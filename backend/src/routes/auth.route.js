@@ -1,17 +1,26 @@
-import express from 'express';
+import express from "express";
+import { login, signup, logout,  updateProfilePic, changePassword , forgotPassword, resetPassword} from "../controllers/auth.controller.js";
+import { protectRoute } from "../middleware/auth.middleware.js";
+import { arcjetProtection } from "../middleware/arcject.middleware.js";
 
 const router = express.Router();
+router.use(arcjetProtection); // sung dụng middleware Arcjet cho tất cả các route trong auth.route.js
 
-router.get("/login", (req, res) => {
-  res.send("Login endpoint");
+router.get("/test",arcjetProtection, (req, res) => {
+  res.status(200).json({ message: "Arcjet protection passed. Access granted." });
 });
 
-router.get("/signup", (req, res) => {
-  res.send("Signup endpoint");
-});
+router.get("/login",arcjetProtection, login);
 
-router.get("/logout", (req, res) => {
-  res.send("Logout endpoint");
-})
+router.post("/signup", signup);
+
+router.get("/logout", logout);
+
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password", resetPassword);
+
+router.put("/update-profilePic", protectRoute ,updateProfilePic);
+router.put("/change-password", protectRoute, changePassword);
 
 export default router;
+
