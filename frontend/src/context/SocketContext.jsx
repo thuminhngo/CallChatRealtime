@@ -7,6 +7,7 @@ import {
   useRef,
   useMemo,
 } from "react";
+
 import { io } from "socket.io-client";
 import { useAuth } from "./AuthContext";
 
@@ -14,7 +15,7 @@ const SocketContext = createContext();
 
 // 1. CẤU HÌNH URL:
 // Tự động lấy từ file .env, nếu không có thì mới dùng localhost:3000
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const BASE_URL = import.meta.env.CLIENT_URL || "http://localhost:3000";
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
