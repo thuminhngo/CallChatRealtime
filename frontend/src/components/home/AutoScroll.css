@@ -1,0 +1,26 @@
+.scroll-container {
+  height: 100%;
+  overflow: hidden; 
+  position: relative;
+}
+
+.scroll-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px; 
+  
+  animation: slide-up-down 20s linear infinite alternate;
+}
+
+@keyframes slide-up-down {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(calc(-100% + 280px));
+  }
+}
+
+.scroll-container:hover .scroll-content {
+  animation-play-state: paused;
+}

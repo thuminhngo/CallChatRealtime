@@ -1,0 +1,35 @@
+.custom-emoji-picker {
+    /* Main Theme Variables */
+    --epr-bg-color: var(--bg-soft) !important;
+    --epr-category-label-bg-color: var(--bg-soft) !important;
+    --epr-text-color: var(--primary-color) !important;
+    --epr-hover-bg-color: var(--primary-hover) !important;
+    --epr-search-input-bg-color: rgb(255, 255, 255) !important;
+}
+
+@media (max-width: 640px) {
+    .custom-emoji-picker {
+        width: 250px !important;
+        max-height: 300px !important;
+        --epr-emoji-size: 18px !important;
+        --epr-search-input-height: 30px !important;
+        --epr-category-navigation-button-size: 22px !important;
+    }
+
+    /* Smaller Category Headers */
+    .custom-emoji-picker .epr-emoji-category-label {
+        font-size: 12px !important;
+        height: 20px !important;
+    }
+
+    .custom-emoji-picker .epr-category-nav {
+        padding: 0 !important;
+        height: 22px !important;
+    }
+
+    .custom-emoji-picker .epr-category-nav>button {
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
+}

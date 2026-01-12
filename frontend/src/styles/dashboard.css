@@ -1,0 +1,87 @@
+/* src/styles/dashboard.css */
+
+/* 1. Tailwind directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 3. LAYOUT KHUNG SƯỜN (GRID SYSTEM) */
+.layout-container {
+  @apply flex h-full w-full bg-[#FAFAFA] overflow-hidden;
+}
+
+/* Sidebar Trái (Cố định 280px) */
+.sidebar-panel {
+  @apply w-[280px] h-full bg-white border-r border-gray-200 flex-shrink-0 flex flex-col;
+}
+
+/* Sidebar Phải (Cố định 300px, ẩn trên mobile) */
+.right-panel {
+  @apply w-[300px] h-full bg-white border-l border-gray-200 hidden xl:flex flex-col flex-shrink-0;
+}
+
+/* Nội dung chính (Co giãn) */
+.main-content {
+  @apply flex-1 h-full min-w-0 flex flex-col relative bg-white;
+}
+
+/* Vùng cuộn (Scroll Area) */
+.scroll-area {
+  @apply flex-1 overflow-y-auto p-6 custom-scrollbar;
+}
+
+/* 4. CHUẨN HÓA UI (TYPOGRAPHY & INPUTS) */
+.page-title {
+  @apply text-xl font-bold text-gray-900;
+}
+
+.page-subtitle {
+  @apply text-sm text-gray-500 mt-1;
+}
+
+.section-label {
+  @apply block text-sm font-medium text-gray-700 mb-1.5;
+}
+
+/* Input sử dụng biến màu để đổi màu theo theme */
+.input-field {
+  @apply w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl outline-none transition-all text-sm;
+}
+
+.input-field:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 4px var(--ring-color);
+}
+
+/* Button sử dụng biến màu */
+.btn-primary {
+  @apply flex items-center justify-center gap-2 px-6 py-2.5 text-white font-medium rounded-xl transition shadow-sm w-full disabled:opacity-70;
+  background-color: var(--primary-color);
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-hover);
+}
+
+/* 5. CUSTOM SCROLLBAR */
+@layer utilities {
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #ec4899 #f3f4f6;
+    /* Thumb màu primary, track màu bg */
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #ec4899;
+    border-radius: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #f3f4f6;
+  }
+
+}
