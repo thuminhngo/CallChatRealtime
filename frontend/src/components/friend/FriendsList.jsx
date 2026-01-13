@@ -79,7 +79,11 @@ export default function FriendsList({ type }) {
           {type === 'online' && ' online'}
         </p>
       </div>
-      <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5" : "flex flex-col gap-2"}>
+      <div className={`flex-1 overflow-y-auto custom-scrollbar p-1 ${
+        viewMode === 'grid' 
+          ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5 content-start" 
+          : "flex flex-col gap-2"
+      }`}>
         {data.map(user => (
           <FriendCard
             key={user?._id || Math.random()}
