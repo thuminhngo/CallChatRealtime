@@ -81,10 +81,14 @@ io.on("connection", (socket) => {
   });
 
   // --- CALL LOGIC (CẬP NHẬT) ---
-  
-  // A. Người gọi yêu cầu gọi
+  // A. Người gọi yêu cầu gọi -> Lưu trạng thái status: 'pending'
   socket.on("call:request", ({ receiverId, channelName, isVideo, name, avatar }) => {
-    activeCalls.set(channelName, { callerId: userId, receiverId, isVideo });
+    activeCalls.set(channelName, { 
+        callerId: userId, 
+        receiverId, 
+        isVideo, 
+        status: "pending" // Đánh dấu là đang chờ bắt máy
+    });
 
     emitToUser(receiverId, "incomingCall", {
       callerInfo: { id: userId, name, avatar },
@@ -98,37 +102,74 @@ io.on("connection", (socket) => {
     const call = activeCalls.get(channelName);
     if (call) {
       emitToUser(call.callerId, "callCancelled", { reason: "rejected" });
-      
-      // Lưu log cuộc gọi nhỡ (từ chối)
       saveCallLogHandler(call.callerId, call.receiverId, call.isVideo, "rejected", 0);
-      
       activeCalls.delete(channelName);
     }
   });
 
-  // C. Kết thúc cuộc gọi (Dùng cho cả 2 phía: Ngắt khi đang gọi HOẶC Ngắt khi chưa nghe máy)
+  // C. Kết thúc cuộc gọi (Nút End hoặc Đóng tab chủ động)
   socket.on("call:end", async ({ channelName, status, duration }) => {
     const call = activeCalls.get(channelName);
     if (!call) return;
 
-    // 1. Lưu log
-    // Nếu client gửi status là "missed" (người gọi tắt trước khi nghe), ta lưu missed
-    await saveCallLogHandler(call.callerId, call.receiverId, call.isVideo, status, duration);
+    // Nếu client không gửi status, tự suy luận:
+    // Nếu status cũ là 'pending' (chưa bắt máy) -> missed
+    // Nếu status cũ là 'active' -> ended
+    const finalStatus = status || (call.status === "pending" ? "missed" : "ended");
 
-    // 2. Quan trọng: Báo cho cả 2 phía là call đã ended
-    // Người gọi: Đóng cửa sổ
-    // Người nhận: Nếu đang hiện Modal -> Tắt Modal. Nếu đang trong cuộc gọi -> Tắt cửa sổ.
+    await saveCallLogHandler(call.callerId, call.receiverId, call.isVideo, finalStatus, duration || 0);
+
+    // Báo cho cả 2 phía tắt
     emitToUser(call.callerId, "call:ended", {});
-    emitToUser(call.receiverId, "call:ended", {});
+    emitToUser(call.receiverId, "call:ended", {}); 
     
-    // 3. Cập nhật lịch sử Realtime
+    // Update lịch sử
     emitToUser(call.callerId, "call:history_updated", {});
     emitToUser(call.receiverId, "call:history_updated", {});
 
     activeCalls.delete(channelName);
   });
 
-  socket.on("disconnect", () => {
+  // D. [MỚI] Xử lý Timeout (30s không ai nghe)
+  socket.on("call:timeout", async ({ channelName }) => {
+    const call = activeCalls.get(channelName);
+    if (call) {
+        // Lưu log cuộc gọi nhỡ
+        await saveCallLogHandler(call.callerId, call.receiverId, call.isVideo, "missed", 0);
+        
+        // Báo người gọi (để đóng cửa sổ) và người nhận (để tắt modal Incoming)
+        emitToUser(call.callerId, "call:ended", { reason: "timeout" });
+        emitToUser(call.receiverId, "call:ended", { reason: "timeout" }); 
+        
+        activeCalls.delete(channelName);
+    }
+  });
+
+  // E. [MỚI] Xử lý ngắt kết nối đột ngột (Đóng tab/Mất mạng)
+  socket.on("disconnect", async () => {
+    // 1. Tìm xem user này có đang trong cuộc gọi nào không
+    for (const [channelName, call] of activeCalls.entries()) {
+        if (call.callerId === userId || call.receiverId === userId) {
+            
+            // Xác định người còn lại
+            const otherUserId = call.callerId === userId ? call.receiverId : call.callerId;
+            
+            // Nếu đang chờ (pending) mà người gọi thoát -> Missed
+            // Nếu đang gọi (active) mà thoát -> Ended
+            const logStatus = call.status === "pending" ? "missed" : "ended";
+            
+            // Lưu log
+            await saveCallLogHandler(call.callerId, call.receiverId, call.isVideo, logStatus, 0);
+
+            // Báo cho người kia biết để tắt màn hình
+            emitToUser(otherUserId, "call:ended", { reason: "peer_disconnected" });
+            
+            activeCalls.delete(channelName);
+            break; // Giả sử mỗi user chỉ gọi 1 cuộc 1 lúc
+        }
+    }
+
+    // 2. Logic dọn dẹp user online cũ (GIỮ NGUYÊN)
     if (userId && userSocketsMap[userId]) {
       userSocketsMap[userId].delete(socket.id);
       if (userSocketsMap[userId].size === 0) {
@@ -138,7 +179,6 @@ io.on("connection", (socket) => {
     io.emit("getOnlineUsers", Object.keys(userSocketsMap));
   });
 });
-
 // Helper Function để gọi Controller (Tránh duplicate code trong socket handler)
 async function saveCallLogHandler(callerId, receiverId, isVideo, status, duration) {
     try {
