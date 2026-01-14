@@ -5,7 +5,6 @@ import fs from "fs";
 // Cấu hình lưu trữ tạm thời trên đĩa cứng
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    // 🔥 QUAN TRỌNG: Dùng process.cwd() để lấy đường dẫn gốc chính xác của dự án
     const uploadPath = path.join(process.cwd(), "uploads");
 
     // Kiểm tra lại lần cuối: Nếu chưa có thì tạo mới (để chắc chắn 100%)

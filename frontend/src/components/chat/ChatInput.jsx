@@ -3,13 +3,18 @@ import { Image, Loader2, Mic, Send, Smile, Trash, X } from "lucide-react";
 import { useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { useChat } from "../../context/ChatContext";
+import { useGroup } from "../../context/GroupContext"; // 1. Import GroupContext
 
-export default function ChatInput({ chat }) {
+export default function ChatInput({ chat, isGroup }) { // 2. Nhận prop isGroup
   const [text, setText] = useState("");
   const [previewImage, setPreviewImage] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const [loading, setLoading] = useState(false);
+  
+  // 3. Lấy hàm gửi tin từ cả 2 context
   const { sendMessage, sendTypingStatus } = useChat();
+  const { sendGroupMessage, sendGroupTyping } = useGroup();
+
   const [isEmojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -18,20 +23,34 @@ export default function ChatInput({ chat }) {
   const mediaRecorderRef = useRef(null);
   const timerRef = useRef(null);
 
+  // 4. Hàm xử lý gửi tin
   const handleSend = async (e) => {
     e.preventDefault();
     if ((!text.trim() && !imageFile) || loading) return;
 
     setLoading(true);
     try {
-      await sendMessage({
-        text: text.trim(),
-        image: imageFile,
-      });
+      if (isGroup) {
+        // --- Logic gửi tin nhắn nhóm ---
+        // Hàm sendGroupMessage trong GroupContext cần ID nhóm và data
+        await sendGroupMessage(chat._id, {
+          text: text.trim(),
+          image: imageFile, 
+        });
+        sendGroupTyping(false);
+      } else {
+        // --- Logic gửi tin nhắn 1-1 ---
+        await sendMessage({
+          text: text.trim(),
+          image: imageFile,
+        });
+        sendTypingStatus(false);
+      }
+
+      // Reset form
       setText("");
       setPreviewImage(null);
       setImageFile(null);
-      sendTypingStatus(false);
     } catch (err) {
       toast.error("Failed to send message");
     } finally {
@@ -39,17 +58,38 @@ export default function ChatInput({ chat }) {
     }
   };
 
+  const handleTyping = (value) => {
+    setText(value);
+    const isTyping = value.length > 0;
+    // 5. Typing status
+    if (isGroup) {
+      sendGroupTyping(isTyping);
+    } else {
+      sendTypingStatus(isTyping);
+    }
+  };
+
+  // 6. Audio Recording
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
       const chunks = [];
       mediaRecorderRef.current.ondataavailable = (e) => chunks.push(e.data);
+      
       mediaRecorderRef.current.onstop = async () => {
         const blob = new Blob(chunks, { type: 'audio/webm' });
-        await sendMessage({ audio: blob });
+        
+        // Gửi audio
+        if (isGroup) {
+           await sendGroupMessage(chat._id, { audio: blob });
+        } else {
+           await sendMessage({ audio: blob });
+        }
+        
         stream.getTracks().forEach(track => track.stop());
       };
+
       mediaRecorderRef.current.start();
       setIsRecording(true);
       timerRef.current = setInterval(() => setRecordingDuration(p => p + 1), 1000);
@@ -69,7 +109,7 @@ export default function ChatInput({ chat }) {
     <div className="p-4 bg-white border-t border-gray-100 relative">
       {isEmojiPickerOpen && (
         <div className="absolute bottom-full right-20 mb-2 z-10">
-          <EmojiPicker onEmojiClick={(e) => setText(p => p + e.emoji)} />
+          <EmojiPicker onEmojiClick={(e) => handleTyping(text + e.emoji)} />
         </div>
       )}
 
@@ -93,8 +133,8 @@ export default function ChatInput({ chat }) {
             <input
               type="text"
               value={text}
-              onChange={(e) => { setText(e.target.value); sendTypingStatus(e.target.value.length > 0); }}
-              placeholder="Type a message..."
+              onChange={(e) => handleTyping(e.target.value)} // Gọi hàm handleTyping đã sửa
+              placeholder={isGroup ? "Message group..." : "Type a message..."}
               className="flex-1 bg-transparent px-2 text-sm outline-none"
             />
             <button type="button" onClick={() => setEmojiPickerOpen(!isEmojiPickerOpen)} className="p-2 text-gray-400 hover:text-yellow-500">

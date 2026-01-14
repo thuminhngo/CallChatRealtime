@@ -1,17 +1,20 @@
-import { Search, X, Users, MessageSquare, Loader, Cloud } from "lucide-react";
+import { Search, X, Users, MessageSquare, Loader, Cloud, User } from "lucide-react";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { axiosInstance } from "../../lib/axios";
 import { useAuth } from "../../context/AuthContext";
+import { useGroup } from "../../context/GroupContext"; 
 
 export default function SidebarHeader({ filter, setFilter, searchQuery, setSearchQuery, onSelectChat, onSelectMessage }) {
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [searchResults, setSearchResults] = useState({ users: [], messages: [] });
+  const [searchResults, setSearchResults] = useState({ users: [], groups: [], messages: [] });
   const [isSearching, setIsSearching] = useState(false);
   const [activeTab, setActiveTab] = useState("all"); 
   const inputRef = useRef(null);
   const debounceRef = useRef(null);
   const dropdownRef = useRef(null);
   const { authUser } = useAuth();
+  
+  const { myGroups } = useGroup();
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -25,7 +28,7 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
 
   const performSearch = useCallback(async (query) => {
     if (!query.trim()) {
-      setSearchResults({ users: [], messages: [] });
+      setSearchResults({ users: [], groups: [], messages: [] });
       return;
     }
 
@@ -37,8 +40,8 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
       ]);
 
       let friends = Array.isArray(usersRes.data) ? usersRes.data : [];
-      
       const queryLower = query.toLowerCase().trim();
+
       const isSearchingSelf = 
         "my cloud".includes(queryLower) || 
         "me".includes(queryLower) ||
@@ -53,16 +56,22 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
         }, ...friends];
       }
 
+      // Lọc nhóm theo tên (Client-side)
+      const matchedGroups = myGroups.filter(group => 
+        group.name.toLowerCase().includes(queryLower)
+      );
+
       setSearchResults({
         users: friends.slice(0, 5),
+        groups: matchedGroups.slice(0, 5),
         messages: Array.isArray(messagesRes.data) ? messagesRes.data.slice(0, 10) : [],
       });
     } catch (error) {
-      console.error("Search error:",);
+      console.error("Search error:", error);
     } finally {
       setIsSearching(false);
     }
-  }, [authUser]); 
+  }, [authUser, myGroups]); 
 
   const handleInputChange = (e) => {
     const value = e.target.value;
@@ -71,21 +80,26 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
     if (value.trim()) {
       debounceRef.current = setTimeout(() => performSearch(value), 300);
     } else {
-      setSearchResults({ users: [], messages: [] });
+      setSearchResults({ users: [], groups: [], messages: [] });
     }
   };
 
   const handleClearSearch = () => {
     setSearchQuery("");
-    setSearchResults({ users: [], messages: [] });
+    setSearchResults({ users: [], groups: [], messages: [] });
     inputRef.current?.focus();
   };
 
   const handleUserSelect = (user) => {
     if (onSelectChat) onSelectChat(user);
-    setSearchQuery("");
-    setSearchResults({ users: [], messages: [] });
-    setIsSearchFocused(false);
+    resetSearch();
+  };
+
+  const handleGroupSelect = (group) => {
+    // onSelectChat sẽ gọi handleSelectChat bên ConversationSidebar
+    // Bên đó đã có logic check (item.name && !item.fullName) nên sẽ nhận diện được đây là group
+    if (onSelectChat) onSelectChat(group); 
+    resetSearch();
   };
 
   const handleMessageSelect = (message) => {
@@ -103,8 +117,12 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
 
     if (onSelectChat) onSelectChat(partnerData);
     if (onSelectMessage) onSelectMessage(message._id);
+    resetSearch();
+  };
+
+  const resetSearch = () => {
     setSearchQuery("");
-    setSearchResults({ users: [], messages: [] });
+    setSearchResults({ users: [], groups: [], messages: [] });
     setIsSearchFocused(false);
   };
 
@@ -131,10 +149,12 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
-  const hasResults = searchResults.users.length > 0 || searchResults.messages.length > 0;
+  const hasResults = searchResults.users.length > 0 || searchResults.groups.length > 0 || searchResults.messages.length > 0;
   const showDropdown = isSearchFocused && searchQuery.trim();
-  const filteredUsers = activeTab === "messages" ? [] : searchResults.users;
-  const filteredMessages = activeTab === "users" ? [] : searchResults.messages;
+  
+  const filteredUsers = activeTab === "messages" || activeTab === "groups" ? [] : searchResults.users;
+  const filteredGroups = activeTab === "messages" || activeTab === "users" ? [] : searchResults.groups;
+  const filteredMessages = activeTab === "users" || activeTab === "groups" ? [] : searchResults.messages;
 
   return (
     <div className="flex flex-col gap-3 p-4 pb-2 border-b border-gray-50 relative" ref={dropdownRef}>
@@ -143,7 +163,7 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
         <input
           ref={inputRef}
           type="text"
-          placeholder="Search friends and messages..."
+          placeholder="Search..."
           value={searchQuery}
           onChange={handleInputChange}
           onFocus={() => setIsSearchFocused(true)}
@@ -159,9 +179,14 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
 
       {showDropdown && (
         <div className="absolute top-full left-0 right-0 mt-1 mx-2 bg-white rounded-xl shadow-xl border border-gray-100 z-50 max-h-[70vh] overflow-hidden animate-fadeIn">
-          <div className="flex gap-1 p-2 border-b border-gray-100 bg-gray-50/50">
-            {[{ key: "all", label: "All", icon: null }, { key: "users", label: "Friends", icon: Users }, { key: "messages", label: "Messages", icon: MessageSquare }].map(({ key, label, icon: Icon }) => (
-              <button key={key} onClick={() => setActiveTab(key)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${activeTab === key ? "bg-pink-100 text-pink-600" : "text-gray-500 hover:bg-gray-100"}`}>
+          <div className="flex gap-1 p-2 border-b border-gray-100 bg-gray-50/50 overflow-x-auto custom-scrollbar">
+            {[
+              { key: "all", label: "All", icon: null },
+              { key: "users", label: "Friends", icon: User },
+              { key: "groups", label: "Groups", icon: Users },
+              { key: "messages", label: "Messages", icon: MessageSquare }
+            ].map(({ key, label, icon: Icon }) => (
+              <button key={key} onClick={() => setActiveTab(key)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${activeTab === key ? "bg-pink-100 text-pink-600" : "text-gray-500 hover:bg-gray-100"}`}>
                 {Icon && <Icon size={14} />} {label}
               </button>
             ))}
@@ -178,7 +203,7 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
               <>
                 {filteredUsers.length > 0 && (
                   <div className="p-2">
-                    <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide"><Users size={14} />Friends</div>
+                    <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide"><User size={14} />Friends</div>
                     <div className="space-y-0.5">
                       {filteredUsers.map((user) => (
                         <button key={user._id} onClick={() => handleUserSelect(user)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-pink-50 transition-all text-left group">
@@ -195,6 +220,30 @@ export default function SidebarHeader({ filter, setFilter, searchQuery, setSearc
                               {user.isSelfChat && <span className="text-[9px] bg-blue-100 text-blue-600 px-1 py-0.5 rounded font-bold uppercase">Me</span>}
                             </p>
                             <p className="text-xs text-gray-400 truncate">{highlightText(user.email || "", searchQuery)}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {filteredGroups.length > 0 && (
+                  <div className="p-2 border-t border-gray-100">
+                    <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide"><Users size={14} />Groups</div>
+                    <div className="space-y-0.5">
+                      {filteredGroups.map((group) => (
+                        <button key={group._id} onClick={() => handleGroupSelect(group)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-purple-50 transition-all text-left group">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-indigo-400 flex items-center justify-center shadow-sm flex-shrink-0 text-white">
+                             {group.avatar ? <img src={group.avatar} className="w-full h-full rounded-full object-cover"/> : <Users size={18} />}
+                          </div>
+                          
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate group-hover:text-purple-600">
+                              {highlightText(group.name, searchQuery)}
+                            </p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {group.members?.length || 0} members
+                            </p>
                           </div>
                         </button>
                       ))}

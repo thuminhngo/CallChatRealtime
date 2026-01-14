@@ -3,8 +3,10 @@ import { useEffect, useMemo, useRef, forwardRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useChat } from "../../context/ChatContext";
 import { useSocket } from "../../context/SocketContext";
+import { useGroup } from "../../context/GroupContext";
 import MessageBubble from "./MessageBubble";
 
+/* ================= UTIL ================= */
 function formatDate(dateStr) {
   if (!dateStr) return "";
   const date = new Date(dateStr);
@@ -24,55 +26,174 @@ function formatTime(dateStr) {
   });
 }
 
-function TypingIndicator({ avatar }) {
+const buildAvatar = (profilePic, fullName) =>
+  profilePic ||
+  `https://ui-avatars.com/api/?name=${encodeURIComponent(
+    fullName || "U"
+  )}&background=random`;
+
+/* ================= UI COMPONENTS ================= */
+
+// 1. Bong bóng 3 chấm (Chỉ phần animation)
+function TypingBubble() {
   return (
-    <div className="flex items-end mb-2 gap-2">
-      <img
-        src={avatar}
-        alt="Avatar"
-        className="w-8 h-8 rounded-full border border-gray-100 object-cover mb-1"
-      />
-      <div className="bg-white border border-gray-100 rounded-[20px] rounded-tl-sm px-4 py-3 shadow-sm">
-        <div className="flex items-center gap-1">
-          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
-          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
-          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
-        </div>
+    <div className="bg-white border border-gray-100 rounded-[20px] rounded-tl-sm px-4 py-3 shadow-sm h-[40px] flex items-center">
+      <div className="flex items-center gap-1">
+        <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+        <span
+          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+          style={{ animationDelay: "150ms" }}
+        />
+        <span
+          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+          style={{ animationDelay: "300ms" }}
+        />
       </div>
     </div>
   );
 }
 
-const MessageList = forwardRef(function MessageList({ chat, highlightMessageId }, ref) {
+// 2. Avatar chồng nhau (cho nhóm nhiều người)
+function AvatarStack({ users }) {
+  return (
+    <div className="flex items-end -space-x-3 mr-2 mb-1">
+      {users.map((u, index) => (
+        <img
+          key={u.id}
+          src={u.avatar}
+          alt={u.fullName}
+          title={u.fullName}
+          className="w-8 h-8 rounded-full border-2 border-white object-cover"
+          style={{ zIndex: users.length - index }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// 3. Indicator tổng hợp (Xử lý logic hiển thị Avatar)
+function TypingIndicator({ isGroup, typingUsersInfo, partnerAvatar }) {
+  // Case 1: Chat 1-1
+  if (!isGroup) {
+    return (
+      <div className="flex items-end mb-2 gap-2">
+        <img
+          src={partnerAvatar}
+          alt="Avatar"
+          className="w-8 h-8 rounded-full border border-gray-100 object-cover mb-1"
+        />
+        <TypingBubble />
+      </div>
+    );
+  }
+
+  // Case 2: Chat Group - Không có ai gõ (Safety check)
+  if (!typingUsersInfo || typingUsersInfo.length === 0) return null;
+
+  // Case 3: Chat Group - 1 người gõ
+  if (typingUsersInfo.length === 1) {
+    const user = typingUsersInfo[0];
+    return (
+      <div className="flex items-end mb-2 gap-2">
+        <img
+          src={user.avatar}
+          alt={user.fullName}
+          title={user.fullName}
+          className="w-8 h-8 rounded-full border border-gray-100 object-cover mb-1"
+        />
+        <div className="flex flex-col">
+           {/* Tùy chọn: Hiển thị tên người gõ nếu muốn */}
+           {/* <span className="text-[10px] text-gray-400 ml-1 mb-0.5">{user.fullName}</span> */}
+           <TypingBubble />
+        </div>
+      </div>
+    );
+  }
+
+  // Case 4: Chat Group - Nhiều người gõ
+  return (
+    <div className="flex items-end mb-2">
+      <AvatarStack users={typingUsersInfo} />
+      <TypingBubble />
+    </div>
+  );
+}
+
+/* ================= MAIN ================= */
+const MessageList = forwardRef(function MessageList(
+  { chat, highlightMessageId, messages, isGroup, isLoading },
+  ref
+) {
   const messagesEndRef = useRef(null);
-  
-  // 1. Lấy thêm isBlockedByPartner từ Context
-  const { messages, getMessagesByUserId, isMessagesLoading, isBlockedByPartner } = useChat();
+  const { isBlockedByPartner } = useChat();
   const { authUser } = useAuth();
   const { typingUsers } = useSocket();
+  const { groupTypingUsers, selectedGroup } = useGroup();
 
-  const chatId = chat?.id || chat?._id;
+  /* ===== 1–1 typing logic ===== */
+  const chatId = !isGroup ? chat?.id || chat?._id : null;
+  const isBlockedByMe = !isGroup && authUser?.blockedUsers?.includes(chatId);
 
-  // 2. Kiểm tra xem mình có chặn họ không
-  const isBlockedByMe = authUser?.blockedUsers?.includes(chatId);
+  const isPartnerTyping =
+    !isGroup &&
+    typingUsers &&
+    typingUsers[chatId] &&
+    !isBlockedByMe &&
+    !isBlockedByPartner;
 
-  // 3. Logic hiển thị Typing: Chỉ hiện khi KHÔNG ai chặn ai
-  const isPartnerTyping = typingUsers && typingUsers[chatId] && !isBlockedByMe && !isBlockedByPartner;
+  /* ===== GROUP typing logic (Đã sửa) ===== */
+  const groupTypingUsersInfo = useMemo(() => {
+    // 1. Basic checks
+    if (!isGroup || !selectedGroup || !groupTypingUsers) return [];
+    
+    // 2. Lấy danh sách ID đang gõ (loại bỏ bản thân)
+    const typingIds = Object.keys(groupTypingUsers).filter(
+      (id) => id && String(id) !== String(authUser?._id)
+    );
 
-  const partnerAvatar = chat?.profilePic ||
-    `https://ui-avatars.com/api/?name=${encodeURIComponent(chat?.fullName || "U")}&background=random`;
+    if (typingIds.length === 0) return [];
 
+    // 3. Map ID sang thông tin User từ selectedGroup.members
+    // Cần kiểm tra kỹ cấu trúc members vì populate có thể khác nhau
+    return typingIds
+      .map((id) => {
+        const member = selectedGroup.members?.find((m) => {
+           const mId = m.user?._id || m.user || m.id; // Xử lý nhiều trường hợp populate
+           return String(mId) === String(id);
+        });
+
+        if (!member) return null;
+
+        // Xử lý lấy thông tin user từ member object
+        const userObj = member.user || member; 
+        const fullName = userObj.fullName || "Member";
+        const profilePic = userObj.profilePic;
+
+        return {
+          id,
+          fullName,
+          avatar: buildAvatar(profilePic, fullName),
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 3); // Giới hạn hiển thị tối đa 3 avatar chồng nhau
+  }, [groupTypingUsers, isGroup, selectedGroup, authUser?._id]);
+
+  const partnerAvatar = buildAvatar(chat?.profilePic, chat?.fullName);
+
+  // Auto scroll logic
   useEffect(() => {
-    if (chatId) getMessagesByUserId(chatId);
-  }, [chat, getMessagesByUserId]);
-
-  useEffect(() => {
-    // Don't auto-scroll if we're navigating to a specific message
     if (!highlightMessageId) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, isPartnerTyping, highlightMessageId]);
+  }, [
+    messages,
+    isPartnerTyping,
+    groupTypingUsersInfo.length, // Trigger scroll khi số lượng người gõ thay đổi
+    highlightMessageId,
+  ]);
 
+  // Group messages by date
   const groupedMessages = useMemo(() => {
     const groups = {};
     if (!messages) return groups;
@@ -84,7 +205,16 @@ const MessageList = forwardRef(function MessageList({ chat, highlightMessageId }
     return groups;
   }, [messages]);
 
-  if (isMessagesLoading) {
+  const getSenderInfo = (msg) => {
+    const userObj = msg.sender || msg.senderId;
+    return {
+      senderId: userObj?._id || userObj,
+      fullName: userObj?.fullName || "Người dùng",
+      profilePic: userObj?.profilePic,
+    };
+  };
+
+  if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <LoaderIcon className="w-8 h-8 animate-spin text-pink-300" />
@@ -92,70 +222,84 @@ const MessageList = forwardRef(function MessageList({ chat, highlightMessageId }
     );
   }
 
+  // Empty State
   if (!messages || messages.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-gray-300 text-sm">
-        No messages yet.
-        {isPartnerTyping && (
-          <div className="absolute bottom-4 left-4">
-            <TypingIndicator avatar={partnerAvatar} />
-          </div>
-        )}
+      <div className="flex-1 flex flex-col items-center justify-center text-gray-300 text-sm relative">
+        Chưa có tin nhắn nào.
+        
+        {/* Typing Indicator in Empty State */}
+        <div className="absolute bottom-4 left-4">
+           {(isPartnerTyping || (isGroup && groupTypingUsersInfo.length > 0)) && (
+              <TypingIndicator 
+                isGroup={isGroup}
+                typingUsersInfo={groupTypingUsersInfo}
+                partnerAvatar={partnerAvatar}
+              />
+           )}
+        </div>
       </div>
     );
   }
 
   return (
-    <div ref={ref} className="flex-1 overflow-y-auto p-4 space-y-6 bg-[#FAFAFA] custom-scrollbar">
+    <div
+      ref={ref}
+      className="flex-1 overflow-y-auto p-4 space-y-6 bg-[#FAFAFA] custom-scrollbar"
+    >
       {Object.entries(groupedMessages).map(([dateKey, msgs]) => (
         <div key={dateKey}>
-          <div className="flex justify-center mb-6 sticky top-0 z-0">
-            <span className="text-[10px] font-bold text-gray-500 bg-gray-200/50 backdrop-blur-sm px-3 py-1 rounded-full uppercase tracking-wide border border-gray-100">
+          <div className="flex justify-center mb-6 sticky top-0 z-10">
+            <span className="text-[10px] font-bold text-gray-500 bg-gray-200/80 px-3 py-1 rounded-full">
               {formatDate(msgs[0].createdAt)}
             </span>
           </div>
+
           <div className="space-y-1">
             {msgs.map((msg, index) => {
               const msgId = msg._id || msg.id;
-              
-              const senderId = msg.senderId?._id || msg.senderId;
+              const { senderId, fullName, profilePic } = getSenderInfo(msg);
               const isMe = String(senderId) === String(authUser?._id);
 
-              const getFallbackAvatar = (name) => `https://ui-avatars.com/api/?name=${encodeURIComponent(name || "U")}&background=random`;
-
-              const messageAvatar = isMe
-                ? (authUser?.profilePic || getFallbackAvatar(authUser?.fullName))
-                : (msg.senderId?.profilePic || chat.profilePic || getFallbackAvatar(chat.fullName));
+              const avatar = isMe
+                ? buildAvatar(authUser?.profilePic, authUser?.fullName)
+                : isGroup
+                ? buildAvatar(profilePic, fullName)
+                : partnerAvatar;
 
               const nextMsg = msgs[index + 1];
-              const nextSenderId = nextMsg ? (nextMsg.senderId?._id || nextMsg.senderId) : null;
-              const isLastInGroup = !nextMsg || String(nextSenderId) !== String(senderId);
-
-              const isHighlighted = highlightMessageId === msgId;
+              const nextSender = nextMsg
+                ? getSenderInfo(nextMsg).senderId
+                : null;
+              const isLastInGroup =
+                !nextMsg || String(nextSender) !== String(senderId);
 
               return (
-                <div
+                <MessageBubble
                   key={msgId}
-                  id={`message-${msgId}`}
-                  className={`transition-all duration-300 rounded-lg ${isHighlighted ? "bg-yellow-100/50 -mx-2 px-2 py-1" : ""
-                    }`}
-                >
-                  <MessageBubble
-                    message={{ ...msg, displayTime: formatTime(msg.createdAt) }}
-                    isMe={isMe}
-                    avatar={messageAvatar}
-                    isLastInGroup={isLastInGroup}
-                  />
-                </div>
+                  message={{ ...msg, displayTime: formatTime(msg.createdAt) }}
+                  isMe={isMe}
+                  avatar={avatar}
+                  isLastInGroup={isLastInGroup}
+                  showSenderName={isGroup && !isMe && isLastInGroup}
+                  senderName={fullName}
+                />
               );
             })}
           </div>
         </div>
       ))}
 
-      {isPartnerTyping && (
-        <TypingIndicator avatar={partnerAvatar} />
-      )}
+      {/* ===== TYPING INDICATOR SECTION ===== */}
+      <div className="sticky bottom-0 pointer-events-none pl-2">
+        {(isPartnerTyping || (isGroup && groupTypingUsersInfo.length > 0)) && (
+          <TypingIndicator
+            isGroup={isGroup}
+            typingUsersInfo={groupTypingUsersInfo}
+            partnerAvatar={partnerAvatar}
+          />
+        )}
+      </div>
 
       <div ref={messagesEndRef} />
     </div>

@@ -19,7 +19,6 @@ const messageSchema = new mongoose.Schema(
     image: {
       type: String,
       default: "",
-  
     },
     audio: {
       type: String,
@@ -38,6 +37,9 @@ const messageSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Thêm chỉ mục text cho trường text để tối ưu tìm kiếm
+messageSchema.index({ text: "text" });
 
 const Message = mongoose.model("Message", messageSchema);
 

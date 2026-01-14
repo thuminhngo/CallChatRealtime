@@ -10,10 +10,10 @@ import cors from "cors";
 import { ENV } from "./lib/env.js";
 import { app, server } from "./lib/socket.js";
 import callRoutes from "./routes/call.route.js";
+import groupRoutes from "./routes/group.route.js";
 import { connectDB } from "./lib/db.js";
 
 dotenv.config();
-
 
 const __dirname = path.resolve();
 
@@ -23,7 +23,6 @@ app.use(express.json({ limit: "10mb" })); //middleware to parse JSON bodies
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(cookieParser()); //middleware to parse cookies
 
-
 app.use(
   cors({
     origin: ENV.CLIENT_URL,
@@ -31,12 +30,12 @@ app.use(
   })
 );
 
-
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/calls", callRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/groups", groupRoutes);
 
 //make ready deployment
 if (process.env.NODE_ENV === "production") {

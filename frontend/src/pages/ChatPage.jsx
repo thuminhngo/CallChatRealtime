@@ -8,6 +8,7 @@ import { LoaderIcon } from "lucide-react";
 import { Outlet, useNavigate } from "react-router-dom";
 import NavigationSidebar from "../components/NavigationSidebar";
 import IncomingCallModal from "../components/IncomingCallModal"; // Khôi phục Modal nhận cuộc gọi
+import { GroupProvider } from "../context/GroupContext";
 
 // Component nội dung chính
 const ChatPageContent = () => {
@@ -52,9 +53,11 @@ export default function ChatPage() {
     <SocketProvider>
       <FriendProvider>
           <ChatProvider>
+            <GroupProvider>
               <CallProvider>
                 <ChatPageContent />
               </CallProvider>
+              </GroupProvider>
           </ChatProvider>
       </FriendProvider>
     </SocketProvider>

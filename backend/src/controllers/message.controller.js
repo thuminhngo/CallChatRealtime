@@ -2,7 +2,12 @@ import Message from "../models/Message.js";
 import User from "../models/User.js";
 import { uploadOnCloudinary } from "../lib/cloudinary.js";
 // ✅ Import đầy đủ các hàm socket cần thiết
-import { getReceiverSocketId, io, isUserOnline, emitToUser } from "../lib/socket.js"; 
+import {
+  getReceiverSocketId,
+  io,
+  isUserOnline,
+  emitToUser,
+} from "../lib/socket.js";
 
 /* =========================
    1. LẤY DANH SÁCH CHAT
@@ -16,7 +21,7 @@ export const getChatPartners = async (req, res) => {
 
     // Lấy danh sách cuộc trò chuyện đã xóa
     const deletedMap = new Map();
-    (me.deletedConversations || []).forEach(item => {
+    (me.deletedConversations || []).forEach((item) => {
       deletedMap.set(item.partnerId.toString(), new Date(item.deletedAt));
     });
 
@@ -27,7 +32,7 @@ export const getChatPartners = async (req, res) => {
 
     const partnerMap = new Map();
 
-    messages.forEach(msg => {
+    messages.forEach((msg) => {
       const partnerId =
         msg.senderId.toString() === myId.toString()
           ? msg.receiverId.toString()
@@ -51,23 +56,31 @@ export const getChatPartners = async (req, res) => {
     });
 
     const partnerIds = [...partnerMap.keys()];
-    const partners = await User.find({ _id: { $in: partnerIds } }).select("-password");
+    const partners = await User.find({ _id: { $in: partnerIds } }).select(
+      "-password"
+    );
 
-    const result = partners.map(p => {
+    const result = partners.map((p) => {
       const data = partnerMap.get(p._id.toString());
       return {
         ...p.toObject(),
         isOnline: isUserOnline(p._id.toString()),
         lastMessage:
           data.lastMessage.text ||
-          (data.lastMessage.image ? "[Hình ảnh]" : data.lastMessage.audio ? "[Voice]" : ""),
+          (data.lastMessage.image
+            ? "[Hình ảnh]"
+            : data.lastMessage.audio
+            ? "[Voice]"
+            : ""),
         lastMessageTime: data.lastMessage.createdAt,
         unreadCount: data.unreadCount,
       };
     });
 
     // Sắp xếp theo tin nhắn mới nhất
-    result.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
+    result.sort(
+      (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime)
+    );
 
     res.status(200).json(result);
   } catch (err) {
@@ -89,16 +102,18 @@ export const getMessagesByUserId = async (req, res) => {
 
     // 1. Kiểm tra block
     const isBlockedByPartner = partner.blockedUsers?.some(
-      id => id.toString() === myId.toString()
+      (id) => id.toString() === myId.toString()
     );
 
     const me = await User.findById(myId);
     // Kiểm tra lịch sử xóa chat
     const deletedState = me.deletedConversations?.find(
-      item => item.partnerId.toString() === partnerId
+      (item) => item.partnerId.toString() === partnerId
     );
 
-    const deletedAt = deletedState ? new Date(deletedState.deletedAt) : new Date(0);
+    const deletedAt = deletedState
+      ? new Date(deletedState.deletedAt)
+      : new Date(0);
 
     // 2. Lấy danh sách tin nhắn
     const messages = await Message.find({
@@ -115,7 +130,7 @@ export const getMessagesByUserId = async (req, res) => {
     // ======================================================
     // 🔥 LOGIC CẬP NHẬT TỨC THÌ (Thêm đoạn này)
     // ======================================================
-    
+
     // Tìm các tin nhắn do đối phương gửi (sender = partnerId)
     // gửi cho mình (receiver = myId) mà chưa đọc (isRead = false)
     const unreadMessages = await Message.updateMany(
@@ -129,17 +144,17 @@ export const getMessagesByUserId = async (req, res) => {
       const partnerSocketId = getReceiverSocketId(partnerId);
       if (partnerSocketId) {
         // Gửi sự kiện 'messagesRead' cho đối phương
-        io.to(partnerSocketId).emit("messagesRead", { 
-          conversationId: myId // ID của cuộc trò chuyện (là mình)
+        io.to(partnerSocketId).emit("messagesRead", {
+          conversationId: myId, // ID của cuộc trò chuyện (là mình)
         });
       }
-      
+
       // (Tuỳ chọn) Gửi sự kiện cho chính các tab khác của mình để cập nhật sidebar
       const mySocketId = getReceiverSocketId(myId);
       if (mySocketId) {
-         io.to(mySocketId).emit("conversationRead", {
-           partnerId: partnerId
-         });
+        io.to(mySocketId).emit("conversationRead", {
+          partnerId: partnerId,
+        });
       }
     }
 
@@ -147,7 +162,6 @@ export const getMessagesByUserId = async (req, res) => {
       messages,
       isBlockedByPartner,
     });
-
   } catch (err) {
     console.error("getMessagesByUserId error:", err);
     res.status(500).json({ message: "Server error" });
@@ -253,7 +267,7 @@ export const reactToMessage = async (req, res) => {
 
     // Tìm xem user này đã react chưa
     const index = message.reactions.findIndex(
-      r => r.userId.toString() === userId.toString()
+      (r) => r.userId.toString() === userId.toString()
     );
 
     if (index > -1) {
@@ -288,10 +302,10 @@ export const deleteConversation = async (req, res) => {
     const { id: partnerId } = req.params;
 
     const user = await User.findById(myId);
-    
+
     // Tìm trong danh sách đã xóa xem có chưa
     const index = user.deletedConversations.findIndex(
-      i => i.partnerId.toString() === partnerId
+      (i) => i.partnerId.toString() === partnerId
     );
 
     if (index > -1) {
@@ -303,6 +317,36 @@ export const deleteConversation = async (req, res) => {
     await user.save();
     res.status(200).json({ success: true });
   } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
+/* =========================
+   7. SEARCH MESSAGES
+========================= */
+export const searchMessages = async (req, res) => {
+  try {
+    const myId = req.user._id;
+    const { q } = req.query;
+
+    if (!q) return res.status(400).json([]);
+
+    const messages = await Message.find({
+      $or: [
+        { senderId: myId },
+        { receiverId: myId }
+      ],
+      text: { $regex: q, $options: "i" }
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate("senderId", "fullName profilePic")
+      .populate("receiverId", "fullName profilePic");
+
+    res.status(200).json(messages);
+  } catch (err) {
+    console.error("searchMessages error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
