@@ -102,9 +102,9 @@ function TypingIndicator({ isGroup, typingUsersInfo, partnerAvatar }) {
           className="w-8 h-8 rounded-full border border-gray-100 object-cover mb-1"
         />
         <div className="flex flex-col">
-           {/* Tùy chọn: Hiển thị tên người gõ nếu muốn */}
-           {/* <span className="text-[10px] text-gray-400 ml-1 mb-0.5">{user.fullName}</span> */}
-           <TypingBubble />
+          {/* Tùy chọn: Hiển thị tên người gõ nếu muốn */}
+          {/* <span className="text-[10px] text-gray-400 ml-1 mb-0.5">{user.fullName}</span> */}
+          <TypingBubble />
         </div>
       </div>
     );
@@ -121,11 +121,14 @@ function TypingIndicator({ isGroup, typingUsersInfo, partnerAvatar }) {
 
 /* ================= MAIN ================= */
 const MessageList = forwardRef(function MessageList(
-  { chat, highlightMessageId, messages, isGroup, isLoading },
+  { chat, messages, isGroup, isLoading },
   ref
 ) {
   const messagesEndRef = useRef(null);
-  const { isBlockedByPartner } = useChat();
+  
+  // 🔥 LẤY STATE TỪ CONTEXT (SỬA ĐỔI)
+  const { isBlockedByPartner, messageIdToScroll, setMessageIdToScroll } = useChat();
+  
   const { authUser } = useAuth();
   const { typingUsers } = useSocket();
   const { groupTypingUsers, selectedGroup } = useGroup();
@@ -141,7 +144,7 @@ const MessageList = forwardRef(function MessageList(
     !isBlockedByMe &&
     !isBlockedByPartner;
 
-  /* ===== GROUP typing logic (Đã sửa) ===== */
+  /* ===== GROUP typing logic ===== */
   const groupTypingUsersInfo = useMemo(() => {
     // 1. Basic checks
     if (!isGroup || !selectedGroup || !groupTypingUsers) return [];
@@ -154,17 +157,15 @@ const MessageList = forwardRef(function MessageList(
     if (typingIds.length === 0) return [];
 
     // 3. Map ID sang thông tin User từ selectedGroup.members
-    // Cần kiểm tra kỹ cấu trúc members vì populate có thể khác nhau
     return typingIds
       .map((id) => {
         const member = selectedGroup.members?.find((m) => {
-           const mId = m.user?._id || m.user || m.id; // Xử lý nhiều trường hợp populate
+           const mId = m.user?._id || m.user || m.id;
            return String(mId) === String(id);
         });
 
         if (!member) return null;
 
-        // Xử lý lấy thông tin user từ member object
         const userObj = member.user || member; 
         const fullName = userObj.fullName || "Member";
         const profilePic = userObj.profilePic;
@@ -181,16 +182,36 @@ const MessageList = forwardRef(function MessageList(
 
   const partnerAvatar = buildAvatar(chat?.profilePic, chat?.fullName);
 
-  // Auto scroll logic
+  // 🔥 LOGIC CUỘN VÀ HIGHLIGHT TIN NHẮN TÌM KIẾM (THÊM MỚI)
   useEffect(() => {
-    if (!highlightMessageId) {
+    if (messageIdToScroll) {
+      const element = document.getElementById(`message-${messageIdToScroll}`);
+      if (element) {
+        // Cuộn tới tin nhắn
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+
+        // Thêm class highlight (bg-yellow-100)
+        element.classList.add("bg-yellow-100", "transition-colors", "duration-[2000ms]");
+
+        // Xóa highlight sau 2 giây
+        setTimeout(() => {
+          element.classList.remove("bg-yellow-100");
+          setMessageIdToScroll(null); // Reset state trong context để có thể tìm lại
+        }, 2000);
+      }
+    }
+  }, [messageIdToScroll, messages, setMessageIdToScroll]);
+
+  // Auto scroll logic (Chỉ chạy khi KHÔNG đang tìm kiếm tin nhắn cũ)
+  useEffect(() => {
+    if (!messageIdToScroll) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [
     messages,
     isPartnerTyping,
-    groupTypingUsersInfo.length, // Trigger scroll khi số lượng người gõ thay đổi
-    highlightMessageId,
+    groupTypingUsersInfo.length,
+    messageIdToScroll,
   ]);
 
   // Group messages by date
@@ -275,15 +296,21 @@ const MessageList = forwardRef(function MessageList(
                 !nextMsg || String(nextSender) !== String(senderId);
 
               return (
-                <MessageBubble
-                  key={msgId}
-                  message={{ ...msg, displayTime: formatTime(msg.createdAt) }}
-                  isMe={isMe}
-                  avatar={avatar}
-                  isLastInGroup={isLastInGroup}
-                  showSenderName={isGroup && !isMe && isLastInGroup}
-                  senderName={fullName}
-                />
+                // 🔥 THÊM DIV BAO BỌC VỚI ID ĐỂ TÌM KIẾM
+                <div 
+                  key={msgId} 
+                  id={`message-${msgId}`} 
+                  className="transition-all duration-500 rounded-lg p-1"
+                >
+                  <MessageBubble
+                    message={{ ...msg, displayTime: formatTime(msg.createdAt) }}
+                    isMe={isMe}
+                    avatar={avatar}
+                    isLastInGroup={isLastInGroup}
+                    showSenderName={isGroup && !isMe && isLastInGroup}
+                    senderName={fullName}
+                  />
+                </div>
               );
             })}
           </div>

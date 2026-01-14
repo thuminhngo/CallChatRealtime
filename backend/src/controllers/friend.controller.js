@@ -261,3 +261,23 @@ export const unfriend = async (req, res) => {
       res.status(500).json({ message: "Server error." });
     }
   };
+
+
+
+  export const searchFriends = async (req, res) => {
+  try {
+    const { q } = req.query;
+    const myId = req.user._id;
+
+    // Tìm kiếm trong danh sách bạn bè của user hiện tại
+    const user = await User.findById(myId).populate({
+      path: "friends",
+      match: { fullName: { $regex: q, $options: "i" } },
+      select: "fullName profilePic email"
+    });
+
+    res.status(200).json(user.friends || []);
+  } catch (error) {
+    res.status(500).json({ message: "Error searching friends" });
+  }
+};

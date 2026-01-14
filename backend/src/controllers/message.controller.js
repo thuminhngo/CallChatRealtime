@@ -1,7 +1,8 @@
 import Message from "../models/Message.js";
 import User from "../models/User.js";
 import { uploadOnCloudinary } from "../lib/cloudinary.js";
-// ✅ Import đầy đủ các hàm socket cần thiết
+import Group from "../models/Group.js"; 
+import GroupMessage from "../models/GroupMessage.js";
 import {
   getReceiverSocketId,
   io,
@@ -321,32 +322,106 @@ export const deleteConversation = async (req, res) => {
   }
 };
 
-
 /* =========================
-   7. SEARCH MESSAGES
+   7. TÌM KIẾM TIN NHẮN GLOBAL (Sửa lỗi null check & import)
 ========================= */
-export const searchMessages = async (req, res) => {
+export const searchMessagesGlobal = async (req, res) => {
   try {
     const myId = req.user._id;
     const { q } = req.query;
+    if (!q) return res.status(200).json([]);
 
-    if (!q) return res.status(400).json([]);
+    const regex = { $regex: q, $options: "i" };
+
+    // 1. Tìm trong tin nhắn 1-1
+    const privateMsgs = await Message.find({
+      $or: [{ senderId: myId }, { receiverId: myId }],
+      text: regex
+    })
+    .populate("senderId", "fullName profilePic")
+    .populate("receiverId", "fullName profilePic")
+    .sort({ createdAt: -1 }) // Sắp xếp mới nhất trước
+    .limit(10);
+
+    // 2. Tìm trong tin nhắn nhóm (Chỉ các nhóm mình tham gia)
+    const myGroups = await Group.find({ "members.user": myId }).select("_id");
+    const groupIds = myGroups.map(g => g._id);
+
+    const groupMsgs = await GroupMessage.find({
+      group: { $in: groupIds },
+      content: regex
+    })
+    .populate("group", "name avatar") // Sửa 'avatar' nếu trong model Group của bạn là 'image' hoặc field khác
+    .populate("sender", "fullName profilePic")
+    .sort({ createdAt: -1 })
+    .limit(10);
+
+    // 3. Chuẩn hóa dữ liệu trả về
+    const results = [
+      ...privateMsgs.map(m => {
+        // Handle trường hợp user đã bị xóa (null check)
+        if (!m.senderId || !m.receiverId) return null;
+        
+        const isMeSender = m.senderId._id.toString() === myId.toString();
+        return {
+          _id: m._id,
+          text: m.text,
+          createdAt: m.createdAt,
+          type: 'private',
+          sender: m.senderId,
+          // Partner là người để mở khung chat (nếu mình gửi thì partner là receiver, ngược lại)
+          partner: isMeSender ? m.receiverId : m.senderId 
+        };
+      }).filter(item => item !== null),
+
+      ...groupMsgs.map(m => {
+         if (!m.sender || !m.group) return null;
+         return {
+          _id: m._id,
+          text: m.content,
+          createdAt: m.createdAt,
+          type: 'group',
+          sender: m.sender,
+          group: m.group,
+          chatId: m.group._id
+        };
+      }).filter(item => item !== null)
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); // Sort chung cả 2 loại
+
+    res.status(200).json(results);
+  } catch (err) {
+    console.error("Global search error:", err);
+    res.status(500).json({ message: "Lỗi tìm kiếm" });
+  }
+};
+
+/* =========================
+   8. TÌM KIẾM TIN NHẮN TRONG CHAT 1-1 (BỔ SUNG QUAN TRỌNG)
+========================= */
+export const searchMessagesInChat = async (req, res) => {
+  try {
+    const myId = req.user._id;
+    const { id: partnerId } = req.params; // ID người mình đang chat cùng
+    const { q } = req.query;
+
+    if (!q) return res.status(200).json([]);
 
     const messages = await Message.find({
       $or: [
-        { senderId: myId },
-        { receiverId: myId }
+        { senderId: myId, receiverId: partnerId },
+        { senderId: partnerId, receiverId: myId },
       ],
       text: { $regex: q, $options: "i" }
     })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .populate("senderId", "fullName profilePic")
-      .populate("receiverId", "fullName profilePic");
+    .populate("senderId", "fullName profilePic")
+    .sort({ createdAt: -1 }); // Mới nhất lên đầu
 
+    // Format lại text để đồng bộ với component MessageSearch (Frontend dùng msg.text)
+    // Lưu ý: MessageSearch.jsx của bạn dùng `msg.text`, backend trả về `text` là khớp rồi.
+    
     res.status(200).json(messages);
   } catch (err) {
-    console.error("searchMessages error:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error("Search in chat error:", err);
+    res.status(500).json({ message: "Lỗi tìm kiếm tin nhắn" });
   }
 };

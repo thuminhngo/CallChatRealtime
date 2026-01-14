@@ -31,6 +31,7 @@ const groupSchema = new mongoose.Schema(
     members: [memberSchema],
     isPrivate: { type: Boolean, default: false },
     inviteCode: { type: String },
+    lastRead: { type: Date, default: Date.now },
     settings: {
       muteNotifications: { type: Boolean, default: false },
       historyVisibleToNewMembers: { type: Boolean, default: true },

@@ -10,6 +10,7 @@ import {
   getPendingRequests,
   cancelFriendRequest,
   unfriend,
+  searchFriends
 } from "../controllers/friend.controller.js";
 import { arcjetProtection } from "../middleware/arcject.middleware.js";
 
@@ -20,7 +21,7 @@ router.get("/list", getFriends); // Lấy danh sách bạn bè
 router.get("/requests", getPendingRequests); // Lời mời đã nhận
 router.get("/sent-requests", getSentRequests); // Lời mời đã gửi
 router.get("/online", getOnlineFriends); // Lấy danh sách bạn bè đang online
-
+router.get("/search-friends", searchFriends);
 router.post("/request", sendFriendRequest); // Gửi lời mời kết bạn
 router.post("/accept", acceptFriendRequest); // Chấp nhận lời mời kết bạn
 router.post("/reject", rejectFriendRequest); // Từ chối lời mời kết bạn

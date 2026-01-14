@@ -50,27 +50,41 @@ export const createGroup = async (req, res) => {
 };
 
 /* =========================================
-   2. LẤY DANH SÁCH NHÓM (CỦA USER)
+   2. LẤY DANH SÁCH NHÓM (CỦA USER) - ĐÃ CẬP NHẬT UNREAD
    ========================================= */
 export const getUserGroups = async (req, res) => {
   try {
     const myId = req.user._id;
     
-    // 1. Lấy nhóm và populate đầy đủ thông tin thành viên
     const groups = await Group.find({ "members.user": myId })
       .populate("owner", "fullName profilePic")
-      .populate("members.user", "fullName profilePic email") // 🔥 FIX: Populate để hiện tên/avatar trong Info
+      .populate("members.user", "fullName profilePic email")
       .sort({ updatedAt: -1 });
 
-    // 2. 🔥 FIX: Lấy tin nhắn cuối cùng cho mỗi nhóm để hiện ở Sidebar
-    const groupsWithLastMessage = await Promise.all(groups.map(async (group) => {
+    const groupsWithDetails = await Promise.all(groups.map(async (group) => {
+        // 1. Lấy tin nhắn cuối
         const lastMsg = await GroupMessage.findOne({ group: group._id })
             .sort({ createdAt: -1 })
             .select("content attachments createdAt");
         
+        // 2. 🔥 TÍNH TOÁN UNREAD COUNT CHO USER HIỆN TẠI
+        // Tìm thông tin member của chính mình trong nhóm
+        const myMemberInfo = group.members.find(m => 
+            (m.user._id || m.user).toString() === myId.toString()
+        );
+        
+        // Mốc thời gian mình đọc lần cuối (nếu chưa có thì lấy ngày tạo nhóm)
+        const lastReadTime = myMemberInfo?.lastRead || group.createdAt;
+
+        // Đếm số tin nhắn sinh ra SAU thời điểm lastRead
+        const unreadCount = await GroupMessage.countDocuments({
+            group: group._id,
+            createdAt: { $gt: lastReadTime }
+        });
+
         const groupObj = group.toObject();
         
-        // Gắn thêm field lastMessage và lastMessageTime
+        // Gắn data
         if (lastMsg) {
             groupObj.lastMessage = lastMsg.content || (lastMsg.attachments?.length ? "[File]" : "No content");
             groupObj.lastMessageTime = lastMsg.createdAt;
@@ -79,15 +93,37 @@ export const getUserGroups = async (req, res) => {
             groupObj.lastMessageTime = group.updatedAt;
         }
         
+        groupObj.unreadCount = unreadCount; // <-- Gắn số chưa đọc vào
+        
         return groupObj;
     }));
 
-    // Sắp xếp lại theo tin nhắn mới nhất
-    groupsWithLastMessage.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
+    groupsWithDetails.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
 
-    res.status(200).json({ success: true, groups: groupsWithLastMessage });
+    res.status(200).json({ success: true, groups: groupsWithDetails });
   } catch (err) {
     console.error("getUserGroups error:", err);
+    res.status(500).json({ message: "Lỗi server" });
+  }
+};
+
+/* =========================================
+   12. ĐÁNH DẤU NHÓM LÀ ĐÃ ĐỌC (MỚI)
+   ========================================= */
+export const markGroupAsRead = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { id: groupId } = req.params;
+
+    // Cập nhật trường lastRead của thành viên trong mảng members thành thời điểm hiện tại
+    await Group.updateOne(
+      { _id: groupId, "members.user": userId },
+      { $set: { "members.$.lastRead": new Date() } }
+    );
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error("markGroupAsRead error:", err);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -472,6 +508,119 @@ export const updateCallStatus = async (req, res) => {
     res.status(200).json({ success: true });
   } catch (err) {
     console.error("updateCallStatus error:", err);
+    res.status(500).json({ message: "Lỗi server" });
+  }
+};
+
+
+export const searchGroupMessages = async (req, res) => {
+  try {
+    const { id: groupId } = req.params;
+    const { q } = req.query;
+
+    const messages = await GroupMessage.find({
+      group: groupId,
+      content: { $regex: q, $options: "i" }
+    })
+    .populate("sender", "fullName profilePic")
+    .sort({ createdAt: -1 });
+
+    // Format lại text để đồng bộ với component MessageSearch
+    const formatted = messages.map(m => ({
+        ...m.toObject(),
+        text: m.content
+    }));
+
+    res.status(200).json(formatted);
+  } catch (err) {
+    res.status(500).json({ message: "Group search error" });
+  }
+};
+
+/* =========================================
+   10. XÓA NHÓM (Chỉ Owner)
+   ========================================= */
+export const deleteGroup = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { id: groupId } = req.params;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Nhóm không tồn tại" });
+
+    // Chỉ Owner mới được xóa
+    if (group.owner.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Chỉ chủ nhóm mới có quyền xóa nhóm" });
+    }
+
+    // 1. Xóa tất cả tin nhắn của nhóm
+    await GroupMessage.deleteMany({ group: groupId });
+
+    // 2. Xóa chính nhóm đó
+    await Group.findByIdAndDelete(groupId);
+
+    // 3. Socket: Báo cho tất cả thành viên biết nhóm đã giải tán
+    for (const m of group.members) {
+       // Báo sự kiện để client tự động xóa nhóm khỏi sidebar
+       emitToUser(m.user, "group:deleted", { groupId, name: group.name });
+    }
+
+    res.status(200).json({ success: true, message: "Đã xóa nhóm thành công" });
+  } catch (err) {
+    console.error("deleteGroup error:", err);
+    res.status(500).json({ message: "Lỗi server" });
+  }
+};
+
+
+/* =========================================
+   11. CHUYỂN QUYỀN SỞ HỮU (Chỉ Owner)
+   ========================================= */
+export const transferOwnership = async (req, res) => {
+  try {
+    const currentOwnerId = req.user._id;
+    const { id: groupId } = req.params;
+    const { newOwnerId } = req.body;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Nhóm không tồn tại" });
+
+    // 1. Kiểm tra quyền Owner
+    if (group.owner.toString() !== currentOwnerId.toString()) {
+      return res.status(403).json({ message: "Chỉ chủ nhóm mới có thể chuyển quyền sở hữu" });
+    }
+
+    // 2. Kiểm tra thành viên mới có trong nhóm không
+    const newOwnerMember = group.members.find(m => m.user.toString() === newOwnerId);
+    if (!newOwnerMember) {
+      return res.status(400).json({ message: "Người được chọn không phải thành viên nhóm" });
+    }
+
+    // 3. Cập nhật Role
+    // - Owner cũ -> Admin
+    const oldOwnerMember = group.members.find(m => m.user.toString() === currentOwnerId.toString());
+    if (oldOwnerMember) oldOwnerMember.role = "admin";
+
+    // - Owner mới -> Owner
+    newOwnerMember.role = "owner";
+    
+    // - Cập nhật trường owner của Group
+    group.owner = newOwnerId;
+
+    await group.save();
+
+    // 4. Populate và trả về dữ liệu mới
+    await group.populate("members.user", "fullName profilePic email");
+    await group.populate("owner", "fullName profilePic");
+
+    // 5. Socket thông báo
+    for (const m of group.members) {
+       emitToUser(m.user._id, "group:updated", group);
+    }
+
+    res.status(200).json({ success: true, group, message: "Đã chuyển quyền sở hữu" });
+  } catch (err) {
+    console.error("transferOwnership error:", err);
     res.status(500).json({ message: "Lỗi server" });
   }
 };

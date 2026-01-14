@@ -48,6 +48,20 @@ export const GroupProvider = ({ children }) => {
    * 1. API HANDLERS
    * ===================================================== */
 
+  // 🔥 1. HÀM ĐÁNH DẤU ĐÃ ĐỌC (MỚI)
+  const markReadGroup = useCallback(async (groupId) => {
+    try {
+      // Cập nhật UI ngay lập tức: reset unreadCount về 0
+      setMyGroups((prev) =>
+        prev.map((g) => (g._id === groupId ? { ...g, unreadCount: 0 } : g))
+      );
+      // Gọi API ngầm để lưu vào DB
+      await axiosInstance.put(`/groups/${groupId}/read`);
+    } catch (error) {
+      console.error("Mark group read error", error);
+    }
+  }, []);
+
   // Lấy danh sách nhóm của user
   const fetchMyGroups = useCallback(async () => {
     setIsGroupsLoading(true);
@@ -77,10 +91,14 @@ export const GroupProvider = ({ children }) => {
     return false;
   };
 
-  // Lấy tin nhắn của group
+  // 🔥 2. CẬP NHẬT: Gọi markReadGroup khi lấy tin nhắn
   const getGroupMessages = useCallback(async (groupId) => {
     if (!groupId) return;
     setIsGroupMessagesLoading(true);
+
+    // Đánh dấu đã đọc ngay khi bắt đầu tải tin nhắn
+    markReadGroup(groupId);
+
     try {
       const res = await axiosInstance.get(`/groups/${groupId}/messages`);
       if (res.data.success) {
@@ -92,7 +110,7 @@ export const GroupProvider = ({ children }) => {
     } finally {
       setIsGroupMessagesLoading(false);
     }
-  }, []);
+  }, [markReadGroup]);
 
   // Gửi tin nhắn group (text / image / audio)
   const sendGroupMessage = async (groupId, messageData) => {
@@ -188,6 +206,26 @@ export const GroupProvider = ({ children }) => {
     }
   };
 
+  // Xóa nhóm (Owner)
+  const deleteGroup = async (groupId) => {
+    try {
+      const res = await axiosInstance.delete(`/groups/${groupId}`);
+      if (res.data.success) {
+        setMyGroups((prev) => prev.filter((g) => g._id !== groupId));
+        
+        if (selectedGroup?._id === groupId) {
+          setSelectedGroup(null);
+        }
+        
+        toast.success("Đã giải tán nhóm");
+        return true;
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Lỗi khi xóa nhóm");
+      return false;
+    }
+  };
+
   // Cập nhật role của thành viên
   const updateMemberRole = async (groupId, userId, role) => {
     try {
@@ -213,6 +251,28 @@ export const GroupProvider = ({ children }) => {
     }
   };
 
+  // CHUYỂN QUYỀN SỞ HỮU
+  const transferOwnership = async (groupId, newOwnerId) => {
+    try {
+      const res = await axiosInstance.put(`/groups/${groupId}/transfer-ownership`, { newOwnerId });
+      if (res.data.success) {
+        const updatedGroup = res.data.group;
+        
+        if (selectedGroup?._id === groupId) {
+            setSelectedGroup(updatedGroup);
+        }
+
+        setMyGroups(prev => prev.map(g => g._id === groupId ? { ...g, ...updatedGroup } : g));
+        
+        toast.success("Đã chuyển quyền sở hữu thành công");
+        return true;
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Lỗi khi chuyển quyền");
+      return false;
+    }
+  };
+
   // Lấy danh sách media đã chia sẻ trong group
   const getGroupSharedMedia = useCallback(() => {
     if (!groupMessages) return [];
@@ -231,29 +291,41 @@ export const GroupProvider = ({ children }) => {
     return media.reverse();
   }, [groupMessages]);
 
-  // Cập nhật lastMessage & sắp xếp group trong sidebar
+  // 🔥 3. CẬP NHẬT: Logic Sidebar Real-time (Unread + Sorting)
   const updateGroupInSidebar = useCallback((groupId, message) => {
-    setMyGroups((prev) =>
-      [...prev]
-        .map((g) =>
-          g._id === groupId
-            ? {
-                ...g,
-                lastMessage:
-                  message.content ||
-                  (message.attachments?.length
-                    ? "[File]"
-                    : ""),
-                updatedAt: new Date().toISOString(),
-              }
-            : g
-        )
-        .sort(
-          (a, b) =>
-            new Date(b.updatedAt) - new Date(a.updatedAt)
-        )
-    );
-  }, []);
+    setMyGroups((prev) => {
+      // a. Tìm và cập nhật nhóm có tin mới
+      const updatedGroups = prev.map((g) => {
+        if (g._id === groupId) {
+          // Kiểm tra xem user có đang mở nhóm này không?
+          const isCurrentlyActive = selectedGroupRef.current?._id === groupId;
+          
+          if (isCurrentlyActive) {
+             // Nếu đang mở nhóm -> Gọi API đánh dấu đọc để cập nhật DB luôn
+             markReadGroup(groupId); 
+          }
+
+          return {
+            ...g,
+            lastMessage: message.content || (message.attachments?.length ? "[File]" : "Tin nhắn mới"),
+            // Cập nhật thời gian bằng thời gian của tin nhắn vừa nhận
+            lastMessageTime: message.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            // Tăng unreadCount nếu KHÔNG đang xem nhóm đó
+            unreadCount: isCurrentlyActive ? 0 : (g.unreadCount || 0) + 1,
+          };
+        }
+        return g;
+      });
+
+      // b. SẮP XẾP NGAY LẬP TỨC: Đưa nhóm mới nhất lên đầu
+      return updatedGroups.sort((a, b) => {
+        const timeA = new Date(a.lastMessageTime || a.updatedAt || 0);
+        const timeB = new Date(b.lastMessageTime || b.updatedAt || 0);
+        return timeB - timeA; // Giảm dần (Mới nhất lên đầu)
+      });
+    });
+  }, [markReadGroup]);
 
   // Cập nhật thông tin group (name / description / avatar)
   const updateGroupInfo = async (groupId, data) => {
@@ -371,11 +443,21 @@ export const GroupProvider = ({ children }) => {
       }
     };
 
+    const onGroupDeleted = ({ groupId, name }) => {
+       setMyGroups((prev) => prev.filter((g) => g._id !== groupId));
+       
+       if (selectedGroupRef.current?._id === groupId) {
+          setSelectedGroup(null);
+          toast.error(`Nhóm "${name}" đã bị giải tán.`);
+       }
+    };
+
     socket.on("group:updated", onGroupUpdated);
     socket.on("group:message", onGroupMessage);
     socket.on("group:invited", onInvited);
     socket.on("group:typing", onTyping);
     socket.on("group:stop-typing", onStopTyping);
+    socket.on("group:deleted", onGroupDeleted);
 
     return () => {
       socket.off("group:updated", onGroupUpdated);
@@ -383,6 +465,7 @@ export const GroupProvider = ({ children }) => {
       socket.off("group:invited", onInvited);
       socket.off("group:typing", onTyping);
       socket.off("group:stop-typing", onStopTyping);
+      socket.off("group:deleted", onGroupDeleted);
     };
   }, [socket, fetchMyGroups, updateGroupInSidebar]);
 
@@ -416,9 +499,12 @@ export const GroupProvider = ({ children }) => {
         groupTypingUsers,
         sendGroupTyping,
         leaveGroup,
+        deleteGroup, 
         updateMemberRole,
+        transferOwnership, 
         getGroupSharedMedia,
         updateGroupInfo,
+        markReadGroup 
       }}
     >
       {children}

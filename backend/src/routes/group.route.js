@@ -1,9 +1,6 @@
 import express from "express";
 import { protectRoute } from "../middleware/auth.middleware.js";
 import { uploadMiddleware } from "../middleware/multer.middleware.js";
-// import { upload } from "../lib/cloudinary.js"; // Không cần thiết nếu đã dùng trong controller
-
-// ✅ FIX: Thêm dấu { và gom gọn các import
 import {
   createGroup,
   getUserGroups,
@@ -18,6 +15,10 @@ import {
   updateCallStatus,
   leaveGroup,
   updateGroup,
+  markGroupAsRead,
+  searchGroupMessages,
+  deleteGroup,
+  transferOwnership,
 } from "../controllers/group.controller.js";
 
 const router = express.Router();
@@ -28,10 +29,14 @@ router.post("/", createGroup);
 router.get("/", getUserGroups);
 router.get("/:id", getGroupById);
 
+router.get("/:id/search", searchGroupMessages);
+
 router.post("/:id/members", addMember);
 router.delete("/:id/members/:userId", removeMember);
 router.put("/:id/members/role", setMemberRole);
 router.post("/:id/leave", leaveGroup);
+router.delete("/:id", deleteGroup);
+router.put("/:id/transfer-ownership", transferOwnership);
 
 router.post(
   "/:id/messages", 
@@ -49,6 +54,8 @@ router.put(
   ]),
   updateGroup
 );
+
+router.put("/:id/read", markGroupAsRead);
 
 
 
