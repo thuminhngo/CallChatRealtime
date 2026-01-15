@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useCall } from "../context/CallContext";
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
-import { PhoneOff, Mic, MicOff, Video, VideoOff, User, Clock } from "lucide-react";
+import AgoraRTC from "agora-rtc-sdk-ng"; 
+import { PhoneOff, Mic, MicOff, Video, VideoOff, User, Clock, Monitor, XSquare } from "lucide-react";
 import { axiosInstance } from "../lib/axios";
 
 export default function CallPage() {
-  const { joinChannel, leaveChannel, localTracks, remoteUsers } = useCall();
+  const { client, joinChannel, leaveChannel, localTracks, remoteUsers } = useCall();
   const { socket } = useSocket();
   const { authUser } = useAuth();
   
@@ -15,6 +16,8 @@ export default function CallPage() {
   const [timer, setTimer] = useState(0);
   const [statusText, setStatusText] = useState("Đang kết nối...");
   const [remoteCamOff, setRemoteCamOff] = useState(false); 
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenTrackRef = useRef(null);
   const isEndedRef = useRef(false); 
   
   const timerRef = useRef(0);
@@ -235,6 +238,70 @@ export default function CallPage() {
     ? remoteAvatar 
     : `https://ui-avatars.com/api/?name=${encodeURIComponent(remoteUserName)}&background=random&size=200`;
 
+
+  
+  // --- LOGIC CHIA SẺ MÀN HÌNH (THÊM MỚI) ---
+  const handleScreenShare = async () => {
+    if (!client) return;
+
+    try {
+      if (isScreenSharing) {
+        await stopScreenShare(); // Nếu đang share thì tắt
+      } else {
+        // 1. Tạo track màn hình
+        // encoderConfig: "1080p_1" giúp hình ảnh rõ nét
+        const screenTrack = await AgoraRTC.createScreenVideoTrack({
+            encoderConfig: "1080p_1", 
+            optimizationMode: "detail" 
+        });
+        
+        screenTrackRef.current = screenTrack;
+
+        // 2. Tắt Camera hiện tại (Unpublish) để nhường chỗ cho màn hình
+        // localTracks[1] là video track (theo logic file CallContext của bạn)
+        if (localTracks[1]) {
+            await client.unpublish(localTracks[1]);
+        }
+
+        // 3. Đẩy màn hình lên (Publish)
+        await client.publish(screenTrack);
+        
+        // 4. Hiển thị màn hình của mình lên ô Local Video
+        if (localVideoRef.current) {
+            screenTrack.play(localVideoRef.current);
+        }
+
+        // 5. Xử lý khi bấm nút "Dừng chia sẻ" mặc định của trình duyệt
+        screenTrack.on("track-ended", () => {
+            stopScreenShare();
+        });
+
+        setIsScreenSharing(true);
+        // setIsCamOn(false); // Tuỳ chọn: có thể set state Cam off nếu muốn
+      }
+    } catch (error) {
+      console.log("Đã huỷ chia sẻ màn hình hoặc lỗi:", error);
+    }
+  };
+
+  const stopScreenShare = async () => {
+    if (!screenTrackRef.current) return;
+
+    // 1. Đóng track màn hình
+    screenTrackRef.current.close();
+    screenTrackRef.current = null;
+
+    // 2. Bật lại Camera (Publish lại track camera cũ)
+    if (localTracks[1]) {
+        await client.publish(localTracks[1]);
+        if (localVideoRef.current) {
+            localTracks[1].play(localVideoRef.current);
+        }
+    }
+    
+    setIsScreenSharing(false);
+  };
+
   return (
     <div className="h-screen w-full bg-gray-900 flex flex-col relative overflow-hidden font-sans">
       
@@ -263,7 +330,7 @@ export default function CallPage() {
 
       {/* LOCAL VIDEO */}
       <div className="absolute top-6 right-6 w-32 h-44 md:w-48 md:h-64 bg-black rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl z-20 transition-all hover:scale-105 hover:border-pink-500/50">
-         <div ref={localVideoRef} className="w-full h-full object-cover transform scale-x-[-1]" /> 
+         <div ref={localVideoRef} className={`w-full h-full object-cover ${isScreenSharing ? "" : "transform scale-x-[-1]"}`} />
          {!isCamOn && (
              <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-800/90 text-gray-400">
                  <User size={32} className="opacity-50"/>
@@ -306,6 +373,14 @@ export default function CallPage() {
                 className={`p-4 rounded-full transition-all duration-200 hover:scale-110 ${isCamOn ? "bg-gray-600/50 text-white hover:bg-gray-500" : "bg-white text-red-500 shadow-[0_0_15px_rgba(255,255,255,0.5)]"}`}
             >
                 {isCamOn ? <Video size={24} /> : <VideoOff size={24} />}
+            </button>
+
+            <button 
+                onClick={handleScreenShare} 
+                title="Chia sẻ màn hình"
+                className={`p-4 rounded-full transition-all duration-200 hover:scale-110 ${isScreenSharing ? "bg-blue-500 text-white" : "bg-gray-600/50 text-white hover:bg-gray-500"}`}
+            >
+                {isScreenSharing ? <XSquare size={24} /> : <Monitor size={24} />}
             </button>
         </div>
       </div>

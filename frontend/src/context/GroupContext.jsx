@@ -12,21 +12,15 @@ import toast from "react-hot-toast";
 import { axiosInstance } from "../lib/axios";
 import { useSocket } from "./SocketContext";
 
-/* =========================================================
- * CONTEXT SETUP
- * ======================================================= */
+
 const GroupContext = createContext();
 export const useGroup = () => useContext(GroupContext);
 
-/* =========================================================
- * PROVIDER
- * ======================================================= */
+
 export const GroupProvider = ({ children }) => {
   const { socket } = useSocket();
 
-  /* -------------------------
-   * STATE
-   * ----------------------- */
+ 
   const [myGroups, setMyGroups] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupMessages, setGroupMessages] = useState([]);
@@ -48,7 +42,7 @@ export const GroupProvider = ({ children }) => {
    * 1. API HANDLERS
    * ===================================================== */
 
-  // 🔥 1. HÀM ĐÁNH DẤU ĐÃ ĐỌC (MỚI)
+  // DD
   const markReadGroup = useCallback(async (groupId) => {
     try {
       // Cập nhật UI ngay lập tức: reset unreadCount về 0
@@ -91,7 +85,7 @@ export const GroupProvider = ({ children }) => {
     return false;
   };
 
-  // 🔥 2. CẬP NHẬT: Gọi markReadGroup khi lấy tin nhắn
+  //Gọi markReadGroup khi lấy tin nhắn
   const getGroupMessages = useCallback(async (groupId) => {
     if (!groupId) return;
     setIsGroupMessagesLoading(true);
@@ -291,7 +285,6 @@ export const GroupProvider = ({ children }) => {
     return media.reverse();
   }, [groupMessages]);
 
-  // 🔥 3. CẬP NHẬT: Logic Sidebar Real-time (Unread + Sorting)
   const updateGroupInSidebar = useCallback((groupId, message) => {
     setMyGroups((prev) => {
       // a. Tìm và cập nhật nhóm có tin mới
@@ -318,7 +311,7 @@ export const GroupProvider = ({ children }) => {
         return g;
       });
 
-      // b. SẮP XẾP NGAY LẬP TỨC: Đưa nhóm mới nhất lên đầu
+      // b.Đưa nhóm mới nhất lên đầu
       return updatedGroups.sort((a, b) => {
         const timeA = new Date(a.lastMessageTime || a.updatedAt || 0);
         const timeB = new Date(b.lastMessageTime || b.updatedAt || 0);

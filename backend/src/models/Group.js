@@ -14,6 +14,8 @@ const memberSchema = new mongoose.Schema(
       enum: ["active", "invited", "left", "banned"],
       default: "active",
     },
+
+    lastRead: { type: Date, default: Date.now },
   },
   { _id: false }
 );

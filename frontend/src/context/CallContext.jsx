@@ -470,7 +470,8 @@ export const CallProvider = ({ children }) => {
       incomingCall,
       setIncomingCall,
       rejectCall,
-      callTimerRef
+      callTimerRef,
+      client,
     }}>
       {children}
     </CallContext.Provider>
