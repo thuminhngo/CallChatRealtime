@@ -1,12 +1,8 @@
-import express from "express";
-import http from "http";
 import { Server } from "socket.io";
+import http from "http";
+import express from "express";
 import { ENV } from "./env.js";
-import { socketAuthMiddleware } from "../middleware/socket.auth.middleware.js";
 
-/* =========================================================
- * APP & SOCKET.IO INIT
- * ======================================================= */
 const app = express();
 const server = http.createServer(app);
 
@@ -18,33 +14,27 @@ const io = new Server(server, {
   },
 });
 
-/* =========================================================
- * GLOBAL STATE
- * ======================================================= */
-
-// userId -> Set(socketId)
+// Map lưu trữ: { userId: Set(socketId) }
 const userSocketsMap = Object.create(null);
 
-// channelName -> call info
+// Map lưu trữ cuộc gọi đang diễn ra
 const activeCalls = new Map();
 
-/* =========================================================
- * HELPERS
- * ======================================================= */
+/* ===================== */
+/* HELPERS (GIỮ NGUYÊN)  */
+/* ===================== */
 
 const normalizeUserId = (userId) => {
   if (!userId || userId === "undefined" || userId === "null") return null;
   return userId.toString();
 };
 
-// ✅ LẤY TẤT CẢ SOCKET (multi-tab, multi-device)
 export const getReceiverSocketIds = (userId) => {
   const id = normalizeUserId(userId);
   if (!id || !userSocketsMap[id]) return [];
   return Array.from(userSocketsMap[id]);
 };
 
-// ✅ GIỮ TÊN CŨ – TRẢ VỀ 1 SOCKET (BACKWARD COMPATIBLE)
 export const getReceiverSocketId = (userId) => {
   const sockets = getReceiverSocketIds(userId);
   return sockets.length ? sockets[sockets.length - 1] : null;
@@ -56,85 +46,45 @@ export const isUserOnline = (userId) => {
 };
 
 export const emitToUser = (userId, event, data) => {
-  getReceiverSocketIds(userId).forEach((sid) => {
-    io.to(sid).emit(event, data);
+  const socketIds = getReceiverSocketIds(userId);
+  socketIds.forEach((socketId) => {
+    io.to(socketId).emit(event, data);
   });
 };
 
-export const emitToGroup = (groupId, event, data) => {
-  if (groupId) io.to(`group:${groupId}`).emit(event, data);
-};
+/* ===================== */
+/* SOCKET LOGIC          */
+/* ===================== */
 
-io.use(socketAuthMiddleware);
-
-/* =========================================================
- * SOCKET HANDLER
- * ======================================================= */
 io.on("connection", (socket) => {
-  const userId = socket.userId;
+  const rawUserId = socket.handshake.query.userId;
+  const userId = normalizeUserId(rawUserId);
 
   if (userId) {
-    if (!userSocketsMap[userId]) userSocketsMap[userId] = new Set();
+    if (!userSocketsMap[userId]) {
+      userSocketsMap[userId] = new Set();
+    }
     userSocketsMap[userId].add(socket.id);
     socket.join(userId);
     io.emit("getOnlineUsers", Object.keys(userSocketsMap));
   }
-
-  /* ================= CHAT TYPING ================= */
+  
+  // --- CHAT LOGIC (GIỮ NGUYÊN) ---
   socket.on("user:typing", ({ receiverId }) => {
-    if (receiverId) emitToUser(receiverId, "user:typing", { senderId: userId });
+    if (!receiverId) return;
+    emitToUser(receiverId, "user:typing", { senderId: userId });
   });
 
   socket.on("user:stop-typing", ({ receiverId }) => {
-    if (receiverId)
-      emitToUser(receiverId, "user:stop-typing", { senderId: userId });
+    if (!receiverId) return;
+    emitToUser(receiverId, "user:stop-typing", { senderId: userId });
   });
 
-  /* ================= GROUP ================= */
-  socket.on("group:join", ({ groupId }) => {
-    if (!groupId) return;
-    socket.join(`group:${groupId}`);
-    socket.to(`group:${groupId}`).emit("group:member:joined", { groupId, userId });
-  });
-
-  socket.on("group:leave", ({ groupId }) => {
-    if (!groupId) return;
-    socket.leave(`group:${groupId}`);
-    socket.to(`group:${groupId}`).emit("group:member:left", { groupId, userId });
-  });
-
-  socket.on("group:message", ({ groupId, message }) => {
-    if (groupId && message)
-      io.to(`group:${groupId}`).emit("group:message", { groupId, message });
-  });
-
-  socket.on("group:typing", ({ groupId }) => {
-    if (groupId)
-      socket.to(`group:${groupId}`).emit("group:typing", {
-        groupId,
-        senderId: userId,
-      });
-  });
-
-  socket.on("group:stop-typing", ({ groupId }) => {
-    if (groupId)
-      socket.to(`group:${groupId}`).emit("group:stop-typing", {
-        groupId,
-        senderId: userId,
-      });
-  });
-
-  /* ================= 1-1 CALL ================= */
-
+  // --- CALL LOGIC (CẬP NHẬT) ---
+  
+  // A. Người gọi yêu cầu gọi
   socket.on("call:request", ({ receiverId, channelName, isVideo, name, avatar }) => {
-    if (!receiverId || !channelName) return;
-
-    activeCalls.set(channelName, {
-      callerId: userId,
-      receiverId,
-      isVideo,
-      status: "pending",
-    });
+    activeCalls.set(channelName, { callerId: userId, receiverId, isVideo });
 
     emitToUser(receiverId, "incomingCall", {
       callerInfo: { id: userId, name, avatar },
@@ -143,130 +93,71 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("call:accepted", ({ channelName }) => {
+  // B. Người nhận từ chối
+  socket.on("call:rejected", ({ channelName }) => {
     const call = activeCalls.get(channelName);
-    if (!call) return;
-
-    call.status = "ongoing";
-    emitToUser(call.callerId, "call:accepted", { channelName });
+    if (call) {
+      emitToUser(call.callerId, "callCancelled", { reason: "rejected" });
+      
+      // Lưu log cuộc gọi nhỡ (từ chối)
+      saveCallLogHandler(call.callerId, call.receiverId, call.isVideo, "rejected", 0);
+      
+      activeCalls.delete(channelName);
+    }
   });
 
-  socket.on("call:rejected", async ({ channelName }) => {
+  // C. Kết thúc cuộc gọi (Dùng cho cả 2 phía: Ngắt khi đang gọi HOẶC Ngắt khi chưa nghe máy)
+  socket.on("call:end", async ({ channelName, status, duration }) => {
     const call = activeCalls.get(channelName);
     if (!call) return;
 
-    await saveCallLogHandler(
-      call.callerId,
-      call.receiverId,
-      call.isVideo,
-      "rejected",
-      0
-    );
+    // 1. Lưu log
+    // Nếu client gửi status là "missed" (người gọi tắt trước khi nghe), ta lưu missed
+    await saveCallLogHandler(call.callerId, call.receiverId, call.isVideo, status, duration);
 
-    emitToUser(call.callerId, "call:ended", { reason: "rejected" });
-    emitToUser(call.receiverId, "call:ended", { reason: "rejected" });
-
-    activeCalls.delete(channelName);
-  });
-
-  socket.on("call:end", async ({ channelName, reason, duration }) => {
-    const call = activeCalls.get(channelName);
-    if (!call) return;
-
-    await saveCallLogHandler(
-      call.callerId,
-      call.receiverId,
-      call.isVideo,
-      reason || "completed",
-      duration || 0
-    );
-
+    // 2. Quan trọng: Báo cho cả 2 phía là call đã ended
+    // Người gọi: Đóng cửa sổ
+    // Người nhận: Nếu đang hiện Modal -> Tắt Modal. Nếu đang trong cuộc gọi -> Tắt cửa sổ.
     emitToUser(call.callerId, "call:ended", {});
     emitToUser(call.receiverId, "call:ended", {});
-    emitToUser(call.callerId, "call:history_updated");
-    emitToUser(call.receiverId, "call:history_updated");
+    
+    // 3. Cập nhật lịch sử Realtime
+    emitToUser(call.callerId, "call:history_updated", {});
+    emitToUser(call.receiverId, "call:history_updated", {});
 
     activeCalls.delete(channelName);
   });
 
-  socket.on("call:timeout", async ({ channelName }) => {
-    const call = activeCalls.get(channelName);
-    if (!call) return;
-
-    await saveCallLogHandler(
-      call.callerId,
-      call.receiverId,
-      call.isVideo,
-      "timeout",
-      0
-    );
-
-    emitToUser(call.callerId, "call:ended", { reason: "timeout" });
-    emitToUser(call.receiverId, "call:ended", { reason: "timeout" });
-
-    activeCalls.delete(channelName);
-  });
-
-  /* ================= DISCONNECT ================= */
-  socket.on("disconnect", async () => {
-    for (const [channelName, call] of activeCalls.entries()) {
-      if (call.callerId === userId || call.receiverId === userId) {
-        const reason = call.status === "pending" ? "timeout" : "completed";
-
-        await saveCallLogHandler(
-          call.callerId,
-          call.receiverId,
-          call.isVideo,
-          reason,
-          0
-        );
-
-        const other =
-          call.callerId === userId ? call.receiverId : call.callerId;
-
-        emitToUser(other, "call:ended", { reason: "peer_disconnected" });
-        activeCalls.delete(channelName);
-        break;
-      }
-    }
-
+  socket.on("disconnect", () => {
     if (userId && userSocketsMap[userId]) {
       userSocketsMap[userId].delete(socket.id);
-      if (!userSocketsMap[userId].size) delete userSocketsMap[userId];
+      if (userSocketsMap[userId].size === 0) {
+        delete userSocketsMap[userId];
+      }
     }
-
     io.emit("getOnlineUsers", Object.keys(userSocketsMap));
   });
 });
 
-/* =========================================================
- * CALL LOG HELPER
- * ======================================================= */
-async function saveCallLogHandler(
-  callerId,
-  receiverId,
-  isVideo,
-  reason,
-  duration
-) {
-  try {
-    const { saveCallLog } = await import("../controllers/call.controller.js");
-
-    await saveCallLog(
-      {
-        user: { _id: callerId },
-        body: {
-          receiverId,
-          callType: isVideo ? "video" : "voice",
-          reason,
-          duration,
+// Helper Function để gọi Controller (Tránh duplicate code trong socket handler)
+async function saveCallLogHandler(callerId, receiverId, isVideo, status, duration) {
+    try {
+      const { saveCallLog } = await import("../controllers/call.controller.js");
+      await saveCallLog(
+        {
+          user: { _id: callerId },
+          body: {
+            receiverId: receiverId,
+            callType: isVideo ? "video" : "voice",
+            status: status || "missed",
+            duration: duration || 0,
+          },
         },
-      },
-      { status: () => ({ json: () => {} }) }
-    );
-  } catch (err) {
-    console.error("saveCallLogHandler error:", err);
-  }
+        { status: () => ({ json: () => {} }) } 
+      );
+    } catch (err) {
+      console.error("Lỗi lưu log cuộc gọi:", err);
+    }
 }
 
 export { io, app, server, userSocketsMap };
