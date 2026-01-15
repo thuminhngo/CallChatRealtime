@@ -37,10 +37,17 @@ const normalizeUserId = (userId) => {
   return userId.toString();
 };
 
-export const getReceiverSocketId = (userId) => {
+// ✅ LẤY TẤT CẢ SOCKET (multi-tab, multi-device)
+export const getReceiverSocketIds = (userId) => {
   const id = normalizeUserId(userId);
   if (!id || !userSocketsMap[id]) return [];
   return Array.from(userSocketsMap[id]);
+};
+
+// ✅ GIỮ TÊN CŨ – TRẢ VỀ 1 SOCKET (BACKWARD COMPATIBLE)
+export const getReceiverSocketId = (userId) => {
+  const sockets = getReceiverSocketIds(userId);
+  return sockets.length ? sockets[sockets.length - 1] : null;
 };
 
 export const isUserOnline = (userId) => {
@@ -49,7 +56,7 @@ export const isUserOnline = (userId) => {
 };
 
 export const emitToUser = (userId, event, data) => {
-  getReceiverSocketId(userId).forEach((sid) => {
+  getReceiverSocketIds(userId).forEach((sid) => {
     io.to(sid).emit(event, data);
   });
 };
@@ -233,7 +240,7 @@ io.on("connection", (socket) => {
 });
 
 /* =========================================================
- * CALL LOG HELPER (FIX CHUẨN CONTROLLER)
+ * CALL LOG HELPER
  * ======================================================= */
 async function saveCallLogHandler(
   callerId,
