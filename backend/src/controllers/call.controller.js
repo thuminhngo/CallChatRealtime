@@ -2,18 +2,17 @@ import Call from "../models/Call.js";
 import User from "../models/User.js";
 import { emitToUser } from "../lib/socket.js";
 import { ENV } from "../lib/env.js";
-import pkg from 'agora-access-token';
+import pkg from "agora-access-token";
 
 const { RtcTokenBuilder, RtcRole } = pkg;
 
 /**
- * 1. Lấy lịch sử cuộc gọi (Dùng cho trang CallsDashboard)
+ * 1. Lấy lịch sử cuộc gọi (Calls Dashboard)
  */
 export const getCallHistory = async (req, res) => {
   try {
     const myId = req.user._id;
 
-    // Tìm tất cả cuộc gọi liên quan đến mình
     const calls = await Call.find({
       $or: [{ callerId: myId }, { receiverId: myId }],
     })
@@ -21,16 +20,18 @@ export const getCallHistory = async (req, res) => {
       .populate("receiverId", "fullName profilePic email")
       .sort({ createdAt: -1 });
 
-    // Định dạng lại dữ liệu để khớp với component CallHistoryItem.jsx
     const formattedCalls = calls.map((call) => {
-      const isOutgoing = call.callerId._id.toString() === myId.toString();
+      const isOutgoing =
+        call.callerId._id.toString() === myId.toString();
       const contact = isOutgoing ? call.receiverId : call.callerId;
 
       return {
         _id: call._id,
-        contact: contact,
+        contact,
         direction: isOutgoing ? "outgoing" : "incoming",
-        status: call.status,
+        status: isOutgoing
+          ? call.callerStatus
+          : call.receiverStatus,
         duration: call.duration,
         callType: call.callType,
         createdAt: call.createdAt,
@@ -39,58 +40,97 @@ export const getCallHistory = async (req, res) => {
 
     res.status(200).json({ success: true, calls: formattedCalls });
   } catch (error) {
-    console.error("Error in getCallHistory:", error);
+    console.error("getCallHistory error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
 /**
- * 2. Lưu lịch sử cuộc gọi mới (Gọi khi cuộc gọi kết thúc/bị từ chối)
+ * 2. Lưu lịch sử cuộc gọi
+ * Được gọi 1 lần DUY NHẤT khi call kết thúc
  */
 export const saveCallLog = async (req, res) => {
   try {
-    const { receiverId, callType, status, duration } = req.body;
+    const { receiverId, callType, reason, duration = 0 } = req.body;
     const callerId = req.user._id;
 
-    const newCall = new Call({
+    if (!receiverId || !callType || !reason) {
+      return res.status(400).json({ message: "Thiếu dữ liệu cuộc gọi" });
+    }
+
+    let callerStatus = "busy";
+    let receiverStatus = "missed";
+
+    switch (reason) {
+      case "completed":
+        callerStatus = "completed";
+        receiverStatus = "completed";
+        break;
+
+      case "timeout":
+        callerStatus = "busy";
+        receiverStatus = "missed";
+        break;
+
+      case "rejected":
+        callerStatus = "busy";
+        receiverStatus = "rejected";
+        break;
+
+      case "cancelled":
+        callerStatus = "cancelled";
+        receiverStatus = "missed";
+        break;
+    }
+
+    const call = await Call.create({
       callerId,
       receiverId,
       callType,
-      status,
+      callerStatus,
+      receiverStatus,
       duration,
     });
 
-    await newCall.save();
+    // realtime update dashboard
+    emitToUser(receiverId, "call:history_updated");
+    emitToUser(callerId, "call:history_updated");
 
-    // Thông báo cho người kia để họ cập nhật danh sách log real-time
-    emitToUser(receiverId, "call:history_updated", newCall);
-
-    res.status(201).json({ success: true, call: newCall });
+    res.status(201).json({ success: true, call });
   } catch (error) {
+    console.error("saveCallLog error:", error);
     res.status(500).json({ message: "Lỗi khi lưu lịch sử cuộc gọi" });
   }
 };
 
 /**
- * 3. HÀM SINH TOKEN AGORA CHO CUỘC GỌI VIDEO/VOICE
+ * 3. Sinh Token Agora (Voice / Video)
  */
 export const generateAgoraToken = async (req, res) => {
   try {
-    const { channelName } = req.query; // Tên phòng được gửi từ Frontend
+    const { channelName } = req.query;
+
     if (!channelName) {
-      return res.status(400).json({ message: "Thiếu tên phòng (channelName)" });
+      return res
+        .status(400)
+        .json({ message: "Thiếu channelName" });
     }
 
-    const appId = ENV.AGORA_APP_ID; 
-    const appCertificate = ENV.AGORA_APP_CERTIFICATE; 
-    const uid = 0; // 0 cho phép Agora tự định danh người dùng
-    const role = RtcRole.PUBLISHER; // Quyền được phát hình ảnh và âm thanh
+    const appId = ENV.AGORA_APP_ID;
+    const appCertificate = ENV.AGORA_APP_CERTIFICATE;
 
-    // Token sẽ hết hạn sau 1 giờ (3600 giây)
-    const expirationTimeInSeconds = 3600;
-    const privilegeExpiredTs = Math.floor(Date.now() / 1000) + expirationTimeInSeconds;
+    if (!appId || !appCertificate) {
+      return res
+        .status(500)
+        .json({ message: "Agora config chưa đầy đủ" });
+    }
 
-    // Gọi hàm của thư viện để sinh ra chuỗi Token mã hóa
+    const uid = 0; // Agora tự gán UID
+    const role = RtcRole.PUBLISHER;
+    const expireSeconds = 3600;
+    const privilegeExpiredTs =
+      Math.floor(Date.now() / 1000) + expireSeconds;
+
     const token = RtcTokenBuilder.buildTokenWithUid(
       appId,
       appCertificate,
@@ -100,9 +140,13 @@ export const generateAgoraToken = async (req, res) => {
       privilegeExpiredTs
     );
 
-    res.status(200).json({ success: true, token, appId });
+    res.status(200).json({
+      success: true,
+      token,
+      appId,
+    });
   } catch (error) {
-    console.error("Lỗi sinh Token:", error);
-    res.status(500).json({ message: "Lỗi Server" });
+    console.error("generateAgoraToken error:", error);
+    res.status(500).json({ message: "Lỗi server" });
   }
 };
