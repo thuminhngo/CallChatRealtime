@@ -37,7 +37,7 @@ const normalizeUserId = (userId) => {
   return userId.toString();
 };
 
-export const getReceiverSocketIds = (userId) => {
+export const getReceiverSocketId = (userId) => {
   const id = normalizeUserId(userId);
   if (!id || !userSocketsMap[id]) return [];
   return Array.from(userSocketsMap[id]);
@@ -49,7 +49,7 @@ export const isUserOnline = (userId) => {
 };
 
 export const emitToUser = (userId, event, data) => {
-  getReceiverSocketIds(userId).forEach((sid) => {
+  getReceiverSocketId(userId).forEach((sid) => {
     io.to(sid).emit(event, data);
   });
 };
