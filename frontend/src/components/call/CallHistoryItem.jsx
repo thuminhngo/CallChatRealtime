@@ -35,42 +35,47 @@ function formatRelativeTime(date) {
 export default function CallHistoryItem({ call, onCall, onVideo, onMessage }) {
   // Determine icon and color based on call status and direction
   const getCallInfo = () => {
-    // Missed/rejected/busy/unavailable calls
-    if (call.status === "missed" || call.status === "rejected" || call.status === "busy" || call.status === "unavailable") {
-      return { 
-        icon: PhoneMissed, 
-        color: "text-red-500", 
-        bg: "bg-red-50", 
-        label: call.status === "rejected" ? "Declined" : 
-               call.status === "busy" ? "Busy" : 
-               call.status === "unavailable" ? "No Answer" : "Missed" 
-      };
+    const { direction, status } = call;
+
+    // 1. NGƯỜI GỌI (Outgoing)
+    if (direction === "outgoing") {
+      if (status === "answered") 
+        return { icon: PhoneOutgoing, color: "text-green-500", bg: "bg-green-50", label: "Outgoing" };
+      
+      if (status === "unavailable") // Trước đây là missed
+        return { icon: PhoneMissed, color: "text-gray-500", bg: "bg-gray-100", label: "No Answer" };
+      
+      if (status === "busy") // Bị từ chối
+        return { icon: Ban, color: "text-red-500", bg: "bg-red-50", label: "User Busy" };
+      
+      if (status === "cancelled") 
+        return { icon: XCircle, color: "text-gray-400", bg: "bg-gray-100", label: "Cancelled" };
     }
-    
-    if (call.status === "cancelled") {
-        return { 
-            icon: PhoneOff, 
-            color: "text-gray-500", 
-            bg: "bg-gray-100", 
-            label: "Cancelled" 
-        };
+
+    // 2. NGƯỜI NHẬN (Incoming)
+    if (direction === "incoming") {
+      if (status === "answered") 
+        return { icon: PhoneIncoming, color: "text-blue-500", bg: "bg-blue-50", label: "Incoming" };
+      
+      if (status === "missed") 
+        return { icon: PhoneMissed, color: "text-red-500", bg: "bg-red-50", label: "Missed Call" };
+      
+      if (status === "rejected") 
+        return { icon: PhoneOff, color: "text-orange-500", bg: "bg-orange-50", label: "Declined" };
     }
-    // Answered calls - check direction
-    if (call.direction === "incoming") {
-      return { icon: PhoneIncoming, color: "text-blue-500", bg: "bg-blue-50", label: "Incoming" };
-    }
-    
-    if (call.direction === "outgoing") {
-      return { icon: PhoneOutgoing, color: "text-green-500", bg: "bg-green-50", label: "Outgoing" };
-    }
-    
-    return { icon: Phone, color: "text-gray-500", bg: "bg-gray-50", label: "Unknown" };
+
+    // Fallback cho các trường hợp cũ hoặc lỗi
+    return { icon: Phone, color: "text-gray-400", bg: "bg-gray-50", label: status };
   };
 
-  const { icon: TypeIcon, color, label } = getCallInfo();
+  const { icon: TypeIcon, color, bg, label } = getCallInfo();
+  
+  // Các phần render bên dưới giữ nguyên
   const contact = call.contact || {};
   const avatarUrl = contact.profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.fullName || 'U')}&background=random`;
-  const isMissed = call.status === "missed" || call.status === "rejected" || call.status === "busy" || call.status === "unavailable";
+  
+  // Highlight đỏ nếu là gọi nhỡ
+  const isMissedAlert = call.direction === "incoming" && call.status === "missed";
 
   return (
     <div className="group flex items-center justify-between p-3 md:p-4 bg-white border border-gray-50 rounded-[20px] hover:shadow-md hover:border-pink-100 transition-all cursor-default">

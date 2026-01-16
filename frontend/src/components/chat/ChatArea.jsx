@@ -26,7 +26,7 @@ const ChatArea = forwardRef(function ChatArea({
   const { isBlockedByPartner } = useChat(); 
   const { authUser } = useAuth(); 
 
-  const { getGroupMessages, groupMessages, isGroupMessagesLoading } = useGroup();
+  const { groupTypingUsers, getGroupMessages, groupMessages, isGroupMessagesLoading } = useGroup();
   const { getMessagesByUserId, messages, isMessagesLoading } = useChat();
 
   useEffect(() => {

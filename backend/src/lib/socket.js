@@ -14,7 +14,6 @@ const io = new Server(server, {
   },
 });
 
-// Map lưu trữ: { userId: Set(socketId) }
 const userSocketsMap = Object.create(null);
 
 // Map lưu trữ cuộc gọi đang diễn ra
@@ -83,6 +82,33 @@ io.on("connection", (socket) => {
     emitToUser(receiverId, "user:stop-typing", { senderId: userId });
   });
 
+
+  // 1. Join Group Room (Để nhận sự kiện real-time của group)
+  socket.on("group:join", ({ groupId }) => {
+    socket.join(groupId);
+    console.log(`User ${socket.id} joined group ${groupId}`);
+  });
+
+  socket.on("group:leave", ({ groupId }) => {
+    socket.leave(groupId);
+  });
+
+  // 2. Xử lý Typing Group
+  socket.on("group:typing", ({ groupId }) => {
+    // Gửi cho tất cả mọi người trong phòng, TRỪ người gửi
+    socket.to(groupId).emit("group:typing", { 
+      groupId, 
+      senderId: userId 
+    });
+  });
+
+  socket.on("group:stop-typing", ({ groupId }) => {
+    socket.to(groupId).emit("group:stop-typing", { 
+      groupId, 
+      senderId: userId 
+    });
+  });
+
   /* ===================== */
   /* CALL LOGIC (CHUẨN HOÁ) */
   /* ===================== */
@@ -103,15 +129,25 @@ io.on("connection", (socket) => {
   });
 
   // 2. Receiver từ chối cuộc gọi (CHỈ notify UI – KHÔNG LOG)
-  socket.on("call:rejected", ({ channelName }) => {
+  // 2. Receiver từ chối cuộc gọi
+  socket.on("call:rejected", async ({ channelName }) => { // Thêm async
     const call = activeCalls.get(channelName);
     if (!call) return;
 
+    // Báo cho người gọi biết bị từ chối (để UI hiện 'User Busy')
     emitToUser(call.callerId, "callCancelled", { reason: "rejected" });
-    // ❌ KHÔNG lưu log ở đây
-    // ❌ KHÔNG xoá activeCalls ở đây
-  });
 
+    // 🔥 THÊM: Lưu log "rejected" ngay tại đây để lịch sử hiển thị đúng
+    await saveCallLogHandler(
+        call.callerId,  // Người gọi
+        userId,         // Người nhận (chính là user đang thao tác từ chối)
+        call.isVideo,
+        "rejected",     // Status gốc
+        0               // Duration 0
+    );
+
+    activeCalls.delete(channelName);
+  });
   // 3. Kết thúc cuộc gọi (ANSWERED / MISSED / CANCELLED)
   socket.on("call:end", async ({ channelName, status, duration }) => {
     const call = activeCalls.get(channelName);

@@ -29,15 +29,15 @@ function formatTime(dateStr) {
 const buildAvatar = (profilePic, fullName) =>
   profilePic ||
   `https://ui-avatars.com/api/?name=${encodeURIComponent(
-    fullName || "U"
+    fullName || "Member"
   )}&background=random`;
 
 /* ================= UI COMPONENTS ================= */
 
-// 1. Bong bóng 3 chấm (Chỉ phần animation)
+// 1. Bong bóng 3 chấm
 function TypingBubble() {
   return (
-    <div className="bg-white border border-gray-100 rounded-[20px] rounded-tl-sm px-4 py-3 shadow-sm h-[40px] flex items-center">
+    <div className="bg-white border border-gray-100 rounded-[20px] rounded-tl-sm px-4 py-3 shadow-sm h-[40px] flex items-center w-fit">
       <div className="flex items-center gap-1">
         <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
         <span
@@ -53,30 +53,32 @@ function TypingBubble() {
   );
 }
 
-// 2. Avatar chồng nhau (cho nhóm nhiều người)
+// 2. Avatar Stack (Sử dụng CSS Flexbox chuẩn để tránh lỗi hiển thị)
 function AvatarStack({ users }) {
   return (
-    <div className="flex items-end -space-x-3 mr-2 mb-1">
+    // -space-x-3: Tạo hiệu ứng xếp chồng (âm margin)
+    // overflow-visible: Đảm bảo bóng đổ không bị cắt
+    <div className="flex items-center -space-x-3 mr-2 mb-1 overflow-visible p-1">
       {users.map((u, index) => (
         <img
           key={u.id}
           src={u.avatar}
           alt={u.fullName}
           title={u.fullName}
-          className="w-8 h-8 rounded-full border-2 border-white object-cover"
-          style={{ zIndex: users.length - index }}
+          className="w-8 h-8 rounded-full border-2 border-white object-cover shadow-sm relative transition-transform hover:-translate-y-1 hover:z-10"
+          style={{ zIndex: index }} // Đảm bảo thứ tự xếp chồng
         />
       ))}
     </div>
   );
 }
 
-// 3. Indicator tổng hợp (Xử lý logic hiển thị Avatar)
+// 3. Indicator tổng hợp
 function TypingIndicator({ isGroup, typingUsersInfo, partnerAvatar }) {
-  // Case 1: Chat 1-1
+  // === CASE 1: Chat 1-1 ===
   if (!isGroup) {
     return (
-      <div className="flex items-end mb-2 gap-2">
+      <div className="flex items-end mb-2 gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <img
           src={partnerAvatar}
           alt="Avatar"
@@ -87,56 +89,58 @@ function TypingIndicator({ isGroup, typingUsersInfo, partnerAvatar }) {
     );
   }
 
-  // Case 2: Chat Group - Không có ai gõ (Safety check)
+  // === CASE 2: Safety Check ===
   if (!typingUsersInfo || typingUsersInfo.length === 0) return null;
 
-  // Case 3: Chat Group - 1 người gõ
+  // === CASE 3: Group - 1 người gõ ===
   if (typingUsersInfo.length === 1) {
     const user = typingUsersInfo[0];
     return (
-      <div className="flex items-end mb-2 gap-2">
+      <div className="flex items-end mb-2 gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <img
           src={user.avatar}
           alt={user.fullName}
-          title={user.fullName}
-          className="w-8 h-8 rounded-full border border-gray-100 object-cover mb-1"
+          className="w-8 h-8 rounded-full border border-gray-100 object-cover mb-1 shadow-sm"
         />
-        <div className="flex flex-col">
-          {/* Tùy chọn: Hiển thị tên người gõ nếu muốn */}
-          {/* <span className="text-[10px] text-gray-400 ml-1 mb-0.5">{user.fullName}</span> */}
+        <div className="flex flex-col items-start">
+          <span className="text-[10px] text-gray-500 ml-1 mb-1 font-medium line-clamp-1 max-w-[150px]">
+            {user.fullName} is typing...
+          </span>
           <TypingBubble />
         </div>
       </div>
     );
   }
 
-  // Case 4: Chat Group - Nhiều người gõ
+  // === CASE 4: Group - Nhiều người gõ (Stack) ===
   return (
-    <div className="flex items-end mb-2">
+    <div className="flex items-end mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <AvatarStack users={typingUsersInfo} />
-      <TypingBubble />
+      <div className="flex flex-col items-start">
+        <span className="text-[10px] text-gray-500 ml-1 mb-1 font-medium">
+          {typingUsersInfo.length} people are typing...
+        </span>
+        <TypingBubble />
+      </div>
     </div>
   );
 }
 
-/* ================= MAIN ================= */
+/* ================= MAIN COMPONENT ================= */
 const MessageList = forwardRef(function MessageList(
   { chat, messages, isGroup, isLoading },
   ref
 ) {
   const messagesEndRef = useRef(null);
   
-  // 🔥 LẤY STATE TỪ CONTEXT (SỬA ĐỔI)
   const { isBlockedByPartner, messageIdToScroll, setMessageIdToScroll } = useChat();
-  
   const { authUser } = useAuth();
   const { typingUsers } = useSocket();
   const { groupTypingUsers, selectedGroup } = useGroup();
 
-  /* ===== 1–1 typing logic ===== */
+  // Logic 1-1
   const chatId = !isGroup ? chat?.id || chat?._id : null;
   const isBlockedByMe = !isGroup && authUser?.blockedUsers?.includes(chatId);
-
   const isPartnerTyping =
     !isGroup &&
     typingUsers &&
@@ -144,31 +148,36 @@ const MessageList = forwardRef(function MessageList(
     !isBlockedByMe &&
     !isBlockedByPartner;
 
-  /* ===== GROUP typing logic ===== */
+  /* ===== LOGIC TÌM USER TRONG GROUP (CÓ LOG DEBUG) ===== */
   const groupTypingUsersInfo = useMemo(() => {
-    // 1. Basic checks
     if (!isGroup || !selectedGroup || !groupTypingUsers) return [];
-    
-    // 2. Lấy danh sách ID đang gõ (loại bỏ bản thân)
+
+    // Lọc ID (bỏ qua bản thân)
     const typingIds = Object.keys(groupTypingUsers).filter(
       (id) => id && String(id) !== String(authUser?._id)
     );
+    
+    // --- DEBUG LOG: Bật F12 lên xem nếu vẫn lỗi ---
+    // console.log("Danh sách ID đang gõ:", typingIds); 
 
     if (typingIds.length === 0) return [];
 
-    // 3. Map ID sang thông tin User từ selectedGroup.members
-    return typingIds
+    const result = typingIds
       .map((id) => {
+        // Tìm member bất chấp cấu trúc dữ liệu (String ID hay Object User)
         const member = selectedGroup.members?.find((m) => {
-           const mId = m.user?._id || m.user || m.id;
+           const mId = m.user?._id || m.user || m.id || m._id; 
            return String(mId) === String(id);
         });
 
-        if (!member) return null;
+        let fullName = "Member";
+        let profilePic = null;
 
-        const userObj = member.user || member; 
-        const fullName = userObj.fullName || "Member";
-        const profilePic = userObj.profilePic;
+        if (member) {
+            const userObj = typeof member.user === 'object' ? member.user : member;
+            fullName = userObj?.fullName || userObj?.username || "Member";
+            profilePic = userObj?.profilePic || null;
+        }
 
         return {
           id,
@@ -176,45 +185,35 @@ const MessageList = forwardRef(function MessageList(
           avatar: buildAvatar(profilePic, fullName),
         };
       })
-      .filter(Boolean)
-      .slice(0, 3); // Giới hạn hiển thị tối đa 3 avatar chồng nhau
+      .slice(0, 4); // Lấy tối đa 4 người cho đẹp đội hình
+
+    return result;
   }, [groupTypingUsers, isGroup, selectedGroup, authUser?._id]);
 
   const partnerAvatar = buildAvatar(chat?.profilePic, chat?.fullName);
 
-  // 🔥 LOGIC CUỘN VÀ HIGHLIGHT TIN NHẮN TÌM KIẾM (THÊM MỚI)
+  /* ===== SCROLL & HIGHLIGHT ===== */
   useEffect(() => {
     if (messageIdToScroll) {
       const element = document.getElementById(`message-${messageIdToScroll}`);
       if (element) {
-        // Cuộn tới tin nhắn
         element.scrollIntoView({ behavior: "smooth", block: "center" });
-
-        // Thêm class highlight (bg-yellow-100)
         element.classList.add("bg-yellow-100", "transition-colors", "duration-[2000ms]");
-
-        // Xóa highlight sau 2 giây
         setTimeout(() => {
           element.classList.remove("bg-yellow-100");
-          setMessageIdToScroll(null); // Reset state trong context để có thể tìm lại
+          setMessageIdToScroll(null);
         }, 2000);
       }
     }
   }, [messageIdToScroll, messages, setMessageIdToScroll]);
 
-  // Auto scroll logic (Chỉ chạy khi KHÔNG đang tìm kiếm tin nhắn cũ)
+  // Auto scroll
   useEffect(() => {
     if (!messageIdToScroll) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [
-    messages,
-    isPartnerTyping,
-    groupTypingUsersInfo.length,
-    messageIdToScroll,
-  ]);
+  }, [messages, isPartnerTyping, groupTypingUsersInfo.length, messageIdToScroll]);
 
-  // Group messages by date
   const groupedMessages = useMemo(() => {
     const groups = {};
     if (!messages) return groups;
@@ -247,10 +246,8 @@ const MessageList = forwardRef(function MessageList(
   if (!messages || messages.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-300 text-sm relative">
-        Chưa có tin nhắn nào.
-        
-        {/* Typing Indicator in Empty State */}
-        <div className="absolute bottom-4 left-4">
+        <p>Chưa có tin nhắn nào.</p>
+        <div className="absolute bottom-4 left-4 w-full">
            {(isPartnerTyping || (isGroup && groupTypingUsersInfo.length > 0)) && (
               <TypingIndicator 
                 isGroup={isGroup}
@@ -296,7 +293,6 @@ const MessageList = forwardRef(function MessageList(
                 !nextMsg || String(nextSender) !== String(senderId);
 
               return (
-                // 🔥 THÊM DIV BAO BỌC VỚI ID ĐỂ TÌM KIẾM
                 <div 
                   key={msgId} 
                   id={`message-${msgId}`} 
@@ -318,7 +314,7 @@ const MessageList = forwardRef(function MessageList(
       ))}
 
       {/* ===== TYPING INDICATOR SECTION ===== */}
-      <div className="sticky bottom-0 pointer-events-none pl-2">
+      <div className="sticky bottom-0 pointer-events-none pl-2 pb-2 bg-gradient-to-t from-[#FAFAFA] via-[#FAFAFA]/90 to-transparent pt-4">
         {(isPartnerTyping || (isGroup && groupTypingUsersInfo.length > 0)) && (
           <TypingIndicator
             isGroup={isGroup}
