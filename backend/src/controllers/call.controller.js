@@ -11,7 +11,7 @@ const { RtcTokenBuilder, RtcRole } = pkg;
  */
 export const getCallHistory = async (req, res) => {
   try {
-    const myId = req.user._id;
+    const myId = req.user._id.toString();
 
     const calls = await Call.find({
       $or: [{ callerId: myId }, { receiverId: myId }],
@@ -21,25 +21,25 @@ export const getCallHistory = async (req, res) => {
       .sort({ createdAt: -1 });
 
     const formattedCalls = calls.map((call) => {
-      const isOutgoing =
-        call.callerId._id.toString() === myId.toString();
+      const isOutgoing = call.callerId._id.toString() === myId;
       const contact = isOutgoing ? call.receiverId : call.callerId;
+      
+      // QUAN TRỌNG: Lấy đúng status của mình
+      const myStatus = isOutgoing ? call.callerStatus : call.receiverStatus;
 
       return {
         _id: call._id,
         contact,
         direction: isOutgoing ? "outgoing" : "incoming",
-        status: isOutgoing
-          ? call.callerStatus
-          : call.receiverStatus,
-        duration: call.duration,
+        status: myStatus, // Trả về status ĐÃ ĐƯỢC CÁ NHÂN HÓA
         callType: call.callType,
+        duration: call.duration,
         createdAt: call.createdAt,
       };
     });
 
     res.status(200).json({ success: true, calls: formattedCalls });
-  } catch (error) {
+  }catch (error) {
     console.error("getCallHistory error:", error);
     res.status(500).json({ message: "Server error" });
   }
@@ -51,55 +51,55 @@ export const getCallHistory = async (req, res) => {
  */
 export const saveCallLog = async (req, res) => {
   try {
-    const { receiverId, callType, reason, duration = 0 } = req.body;
+    const { receiverId, callType, status, duration = 0 } = req.body;
     const callerId = req.user._id;
 
-    if (!receiverId || !callType || !reason) {
-      return res.status(400).json({ message: "Thiếu dữ liệu cuộc gọi" });
-    }
+    // 1. Logic phân loại trạng thái (như đã bàn)
+    let callerStatus = "answered";
+    let receiverStatus = "answered";
 
-    let callerStatus = "busy";
-    let receiverStatus = "missed";
-
-    switch (reason) {
-      case "completed":
-        callerStatus = "completed";
-        receiverStatus = "completed";
+    switch (status) {
+      case "answered":
+        callerStatus = "answered";
+        receiverStatus = "answered";
         break;
-
-      case "timeout":
-        callerStatus = "busy";
+      case "missed":
+        callerStatus = "missed";
         receiverStatus = "missed";
         break;
-
-      case "rejected":
+      case "cancelled":
+        callerStatus = "cancelled"; 
+        receiverStatus = "missed"; 
+        break;
+      case "busy":
         callerStatus = "busy";
         receiverStatus = "rejected";
         break;
-
-      case "cancelled":
-        callerStatus = "cancelled";
-        receiverStatus = "missed";
-        break;
+      default:
+        callerStatus = status;
+        receiverStatus = status;
     }
 
+    // 2. TẠO RECORD (Sửa lỗi thiếu trường 'status' ở đây)
     const call = await Call.create({
       callerId,
       receiverId,
       callType,
+      status: status, // <--- QUAN TRỌNG: Phải có trường này vì Schema yêu cầu
       callerStatus,
       receiverStatus,
       duration,
     });
 
-    // realtime update dashboard
-    emitToUser(receiverId, "call:history_updated");
-    emitToUser(callerId, "call:history_updated");
+    // 3. Bắn tín hiệu cập nhật cho 2 bên
+    // Dùng emitToUser để đảm bảo Tab Dashboard nhận được
+    emitToUser(receiverId, "call:history_updated", {});
+    emitToUser(callerId, "call:history_updated", {});
 
     res.status(201).json({ success: true, call });
   } catch (error) {
-    console.error("saveCallLog error:", error);
-    res.status(500).json({ message: "Lỗi khi lưu lịch sử cuộc gọi" });
+    console.error("Lỗi saveCallLog:", error); // Kiểm tra terminal xem có lỗi này không
+    res.status(500).json({ message: "Lỗi lưu lịch sử" });
   }
 };
 

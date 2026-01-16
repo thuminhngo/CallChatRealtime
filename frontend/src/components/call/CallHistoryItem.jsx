@@ -1,4 +1,4 @@
-import { Phone, Video, MessageCircle, PhoneIncoming, PhoneOutgoing, PhoneMissed, Clock } from "lucide-react";
+import { Phone,PhoneOff, Video, MessageCircle, PhoneIncoming, PhoneOutgoing, PhoneMissed, Clock } from "lucide-react";
 
 // Format duration in seconds to mm:ss or hh:mm:ss
 function formatDuration(seconds) {
@@ -47,6 +47,14 @@ export default function CallHistoryItem({ call, onCall, onVideo, onMessage }) {
       };
     }
     
+    if (call.status === "cancelled") {
+        return { 
+            icon: PhoneOff, 
+            color: "text-gray-500", 
+            bg: "bg-gray-100", 
+            label: "Cancelled" 
+        };
+    }
     // Answered calls - check direction
     if (call.direction === "incoming") {
       return { icon: PhoneIncoming, color: "text-blue-500", bg: "bg-blue-50", label: "Incoming" };
