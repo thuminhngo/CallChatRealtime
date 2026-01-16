@@ -15,8 +15,6 @@ const io = new Server(server, {
 });
 
 const userSocketsMap = Object.create(null);
-
-// Map lưu trữ cuộc gọi đang diễn ra
 const activeCalls = new Map();
 
 /* ===================== */
@@ -82,78 +80,64 @@ io.on("connection", (socket) => {
     emitToUser(receiverId, "user:stop-typing", { senderId: userId });
   });
 
-
-  // 1. Join Group Room (Để nhận sự kiện real-time của group)
   socket.on("group:join", ({ groupId }) => {
     socket.join(groupId);
-    console.log(`User ${socket.id} joined group ${groupId}`);
   });
 
   socket.on("group:leave", ({ groupId }) => {
     socket.leave(groupId);
   });
 
-  // 2. Xử lý Typing Group
   socket.on("group:typing", ({ groupId }) => {
-    // Gửi cho tất cả mọi người trong phòng, TRỪ người gửi
-    socket.to(groupId).emit("group:typing", { 
-      groupId, 
-      senderId: userId 
-    });
+    socket.to(groupId).emit("group:typing", { groupId, senderId: userId });
   });
 
   socket.on("group:stop-typing", ({ groupId }) => {
-    socket.to(groupId).emit("group:stop-typing", { 
-      groupId, 
-      senderId: userId 
-    });
+    socket.to(groupId).emit("group:stop-typing", { groupId, senderId: userId });
   });
 
   /* ===================== */
   /* CALL LOGIC (CHUẨN HOÁ) */
   /* ===================== */
 
-  // 1. Caller gửi yêu cầu gọi
   socket.on("call:request", ({ receiverId, channelName, isVideo, name, avatar }) => {
+    // Lưu receiverId đã chuẩn hóa để tránh lỗi mismatch
+    const normalizedReceiverId = normalizeUserId(receiverId);
+    
     activeCalls.set(channelName, {
       callerId: userId,
-      receiverId,
+      receiverId: normalizedReceiverId,
       isVideo,
     });
 
-    emitToUser(receiverId, "incomingCall", {
+    emitToUser(normalizedReceiverId, "incomingCall", {
       callerInfo: { id: userId, name, avatar },
       channelName,
       isVideo,
     });
   });
 
-  // 2. Receiver từ chối cuộc gọi (CHỈ notify UI – KHÔNG LOG)
-  // 2. Receiver từ chối cuộc gọi
-  socket.on("call:rejected", async ({ channelName }) => { // Thêm async
+  socket.on("call:rejected", async ({ channelName }) => {
     const call = activeCalls.get(channelName);
     if (!call) return;
 
-    // Báo cho người gọi biết bị từ chối (để UI hiện 'User Busy')
     emitToUser(call.callerId, "callCancelled", { reason: "rejected" });
 
-    // 🔥 THÊM: Lưu log "rejected" ngay tại đây để lịch sử hiển thị đúng
     await saveCallLogHandler(
-        call.callerId,  // Người gọi
-        userId,         // Người nhận (chính là user đang thao tác từ chối)
+        call.callerId,
+        userId,
         call.isVideo,
-        "rejected",     // Status gốc
-        0               // Duration 0
+        "rejected",
+        0
     );
 
     activeCalls.delete(channelName);
   });
-  // 3. Kết thúc cuộc gọi (ANSWERED / MISSED / CANCELLED)
+
   socket.on("call:end", async ({ channelName, status, duration }) => {
     const call = activeCalls.get(channelName);
     if (!call) return;
 
-    // Lưu log DUY NHẤT tại đây
     await saveCallLogHandler(
       call.callerId,
       call.receiverId,
@@ -162,25 +146,18 @@ io.on("connection", (socket) => {
       duration
     );
 
-    // Tắt UI 2 phía
     emitToUser(call.callerId, "call:ended", {});
     emitToUser(call.receiverId, "call:ended", {});
-
-    // Cập nhật lịch sử
     emitToUser(call.callerId, "call:history_updated", {});
     emitToUser(call.receiverId, "call:history_updated", {});
 
     activeCalls.delete(channelName);
   });
 
-  // 4. Người dùng mất kết nối (KHÔNG LOG)
   socket.on("disconnect", () => {
     for (const [channelName, call] of activeCalls.entries()) {
       if (call.callerId === userId || call.receiverId === userId) {
-        const otherUserId =
-          call.callerId === userId ? call.receiverId : call.callerId;
-
-        // Chỉ tắt UI người còn lại
+        const otherUserId = call.callerId === userId ? call.receiverId : call.callerId;
         emitToUser(otherUserId, "call:ended", {});
         activeCalls.delete(channelName);
         break;
@@ -198,14 +175,9 @@ io.on("connection", (socket) => {
   });
 });
 
-/* ===================== */
-/* HELPER SAVE CALL LOG  */
-/* ===================== */
-
 async function saveCallLogHandler(callerId, receiverId, isVideo, status, duration) {
   try {
     const { saveCallLog } = await import("../controllers/call.controller.js");
-
     await saveCallLog(
       {
         user: { _id: callerId },

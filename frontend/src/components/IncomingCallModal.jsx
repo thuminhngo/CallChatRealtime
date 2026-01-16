@@ -81,58 +81,62 @@ export default function IncomingCallModal() {
   if (!incomingCall) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-[40px] p-8 flex flex-col items-center shadow-2xl border-4 border-pink-50 w-full max-w-sm relative overflow-hidden">
-        
-        {/* Nền trang trí */}
-        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-pink-500 to-violet-500"></div>
+  <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div className="relative w-full max-w-sm bg-white rounded-3xl px-6 pt-8 pb-10 shadow-2xl">
 
-        {/* Avatar */}
-        <div className="relative mb-6 mt-2">
-            <div className="absolute inset-0 bg-pink-500 rounded-full animate-ping opacity-20 duration-1000"></div>
-            <div className="absolute inset-0 bg-pink-400 rounded-full animate-pulse opacity-30 delay-75"></div>
-            <img
-                src={getSafeAvatar()}
-                // Fallback lần cuối nếu link ảnh upload bị lỗi 404 thì vẫn quay về API
-                onError={(e) => {
-                    e.target.onerror = null; // Tránh loop vô hạn
-                    e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(incomingCall.callerInfo.name)}&background=random&color=fff&size=200`;
-                }}
-                className="w-28 h-28 rounded-full border-4 border-white shadow-xl object-cover relative z-10"
-                alt="Caller"
-            />
-        </div>
+      {/* Thanh nhấn trên */}
+      <div className="absolute top-0 left-0 w-full h-1 rounded-t-3xl bg-gradient-to-r from-pink-500 to-violet-500" />
 
-        <h3 className="text-2xl font-bold text-gray-800 mb-1 text-center truncate w-full px-2">
-            {incomingCall.callerInfo.name}
-        </h3>
-        
-        <p className="text-pink-500 font-medium mb-10 flex items-center gap-2 animate-pulse">
-           {incomingCall.isVideo ? "📞 Đang gọi video..." : "📞 Đang gọi thoại..."}
-        </p>
+      {/* Avatar */}
+      <div className="relative flex justify-center mb-6">
+        <div className="absolute inset-0 rounded-full bg-pink-400/30 animate-pulse"></div>
+        <img
+          src={getSafeAvatar()}
+          onError={(e) => {
+            e.target.onerror = null;
+            e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+              incomingCall.callerInfo.name
+            )}&background=random&color=fff&size=200`;
+          }}
+          alt="Caller"
+          className="relative z-10 w-24 h-24 rounded-full object-cover border-4 border-white shadow-lg"
+        />
+      </div>
 
-        <div className="flex gap-10 w-full justify-center items-end">
-          <button
-            onClick={rejectCall}
-            className="flex flex-col items-center gap-2 group transition-transform active:scale-95"
-          >
-            <div className="bg-red-500 p-5 rounded-full text-white shadow-red-200 shadow-lg group-hover:bg-red-600 group-hover:shadow-red-300 transition-all duration-300">
-                <PhoneOff size={32} fill="currentColor"/>
-            </div>
-            <span className="text-xs text-gray-500 font-medium">Từ chối</span>
-          </button>
+      {/* Tên */}
+      <h3 className="text-lg font-semibold text-gray-800 text-center truncate">
+        {incomingCall.callerInfo.name}
+      </h3>
 
-          <button
-            onClick={handleAccept}
-            className="flex flex-col items-center gap-2 group transition-transform active:scale-95"
-          >
-            <div className="bg-green-500 p-5 rounded-full text-white shadow-green-200 shadow-lg group-hover:bg-green-600 group-hover:shadow-green-300 transition-all duration-300 animate-bounce">
-                <Phone size={32} fill="currentColor"/>
-            </div>
-            <span className="text-xs text-gray-500 font-medium">Nghe máy</span>
-          </button>
-        </div>
+      {/* Trạng thái */}
+      <p className="mt-1 text-sm text-pink-500 text-center">
+        {incomingCall.isVideo ? "Cuộc gọi video đến" : "Cuộc gọi thoại đến"}
+      </p>
+
+      {/* Nút hành động */}
+      <div className="mt-8 flex justify-center gap-12">
+        {/* Từ chối */}
+        <button
+          onClick={rejectCall}
+          className="flex flex-col items-center gap-2 active:scale-95 transition"
+        >
+          <div className="w-14 h-14 rounded-full bg-red-500 flex items-center justify-center text-white shadow-md hover:bg-red-600 transition">
+            <PhoneOff size={26} />
+          </div>
+          <span className="text-xs text-gray-500">Từ chối</span>
+        </button>
+
+        {/* Nghe */}
+        <button
+          onClick={handleAccept}
+          className="flex flex-col items-center gap-2 active:scale-95 transition"
+        >
+          <div className="w-14 h-14 rounded-full bg-green-500 flex items-center justify-center text-white shadow-md hover:bg-green-600 transition animate-pulse">
+            <Phone size={26} />
+          </div>
+          <span className="text-xs text-gray-500">Nghe máy</span>
+        </button>
       </div>
     </div>
-  );
-}
+  </div>
+);}
